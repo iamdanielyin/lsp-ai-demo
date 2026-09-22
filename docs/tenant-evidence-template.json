@@ -1,0 +1,357 @@
+{
+  "version": "2026-09-22",
+  "tenant_product_shape": "unconfirmed",
+  "implemented_route": "freshchat",
+  "implemented_route_status": "implementation_pending_tenant_verification",
+  "overall": "core_capabilities_not_all_passed",
+  "tenant_identifier": "<TENANT_ID>",
+  "channels": [
+    {
+      "name": "WhatsApp",
+      "status": "blocked",
+      "connector": "<ACTUAL_CONNECTOR>",
+      "capabilities": {
+        "inbound": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "api_message_id": null,
+          "omni_visible": null,
+          "customer_received": null,
+          "confirmation_type": null,
+          "evidence": []
+        },
+        "history": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "api_message_id": null,
+          "omni_visible": null,
+          "customer_received": null,
+          "confirmation_type": null,
+          "evidence": []
+        },
+        "manual_text": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "api_message_id": null,
+          "omni_visible": null,
+          "customer_received": null,
+          "confirmation_type": null,
+          "evidence": []
+        },
+        "image": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "api_message_id": null,
+          "omni_visible": null,
+          "customer_received": null,
+          "confirmation_type": null,
+          "evidence": []
+        },
+        "video": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "api_message_id": null,
+          "omni_visible": null,
+          "customer_received": null,
+          "confirmation_type": null,
+          "evidence": []
+        },
+        "file": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "api_message_id": null,
+          "omni_visible": null,
+          "customer_received": null,
+          "confirmation_type": null,
+          "evidence": []
+        },
+        "ai_text": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "api_message_id": null,
+          "omni_visible": null,
+          "customer_received": null,
+          "confirmation_type": null,
+          "evidence": []
+        },
+        "ai_media": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "api_message_id": null,
+          "omni_visible": null,
+          "customer_received": null,
+          "confirmation_type": null,
+          "evidence": []
+        },
+        "omni_visible": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "api_message_id": null,
+          "omni_visible": null,
+          "customer_received": null,
+          "confirmation_type": null,
+          "evidence": []
+        },
+        "ticket": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "api_message_id": null,
+          "omni_visible": null,
+          "customer_received": null,
+          "confirmation_type": null,
+          "evidence": []
+        },
+        "quote_bubble": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "api_message_id": null,
+          "omni_visible": null,
+          "customer_received": null,
+          "confirmation_type": null,
+          "evidence": []
+        }
+      }
+    },
+    {
+      "name": "WeChat",
+      "status": "blocked",
+      "connector": "<ACTUAL_CONNECTOR>",
+      "note": "用户已指定第二渠道为WeChat；与WhatsApp各绑定一个账号并同时测试，不以Webchat代替",
+      "capabilities": {
+        "inbound": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "evidence": []
+        },
+        "history": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "evidence": []
+        },
+        "manual_text": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "evidence": []
+        },
+        "image": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "evidence": []
+        },
+        "video": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "evidence": []
+        },
+        "file": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "evidence": []
+        },
+        "ai_text": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "evidence": []
+        },
+        "ai_media": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "evidence": []
+        },
+        "omni_visible": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "evidence": []
+        },
+        "ticket": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "evidence": []
+        },
+        "quote_bubble": {
+          "status": "not_tested",
+          "checked_at": null,
+          "target": "<TEST_CONVERSATION_ID>",
+          "evidence": []
+        }
+      }
+    }
+  ],
+  "acceptance_cases": [
+    {
+      "id": "T01",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    },
+    {
+      "id": "T02",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    },
+    {
+      "id": "T03",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    },
+    {
+      "id": "T04",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    },
+    {
+      "id": "T05",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    },
+    {
+      "id": "T06",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    },
+    {
+      "id": "T07",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    },
+    {
+      "id": "T08",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    },
+    {
+      "id": "T09",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    },
+    {
+      "id": "T10",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    },
+    {
+      "id": "T11",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    },
+    {
+      "id": "T12",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    },
+    {
+      "id": "T13",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    },
+    {
+      "id": "T14",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    },
+    {
+      "id": "T15",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    },
+    {
+      "id": "T16",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    },
+    {
+      "id": "T17",
+      "status": "blocked",
+      "evidence": [],
+      "elapsed_ms": null,
+      "usage_tokens": null,
+      "reason": "缺少真实租户、渠道及账号条件；不得以本地替身结果替代"
+    }
+  ],
+  "stability": {
+    "required_auto_replies_per_channel": 10,
+    "measured_auto_replies": 0,
+    "consecutive_followup_rounds": 0,
+    "latency_ms": null,
+    "usage_tokens": null
+  },
+  "privacy": "仅写脱敏状态、ID、耗时及证据引用，不填密钥或原始客户内容",
+  "test_pairing": {
+    "mode": "one_account_per_channel",
+    "code_ttl_seconds": 300,
+    "whatsapp_binding": "not_tested",
+    "wechat_binding": "not_tested",
+    "independent_takeover": "not_tested",
+    "resume_new_messages_only": "not_tested",
+    "end_all_tests": "not_tested",
+    "evidence": []
+  }
+}

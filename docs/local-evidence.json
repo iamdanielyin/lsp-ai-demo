@@ -1,0 +1,139 @@
+{
+  "scope": "local_only_synthetic_providers_not_tenant_acceptance",
+  "date": "2026-09-22",
+  "unit_tests": {
+    "command": ".venv/bin/python -m unittest discover -s tests -v",
+    "passed": 67,
+    "failed": 0,
+    "duration_seconds": 9.612
+  },
+  "syntax": [
+    "python compileall passed",
+    "node --check static/app.js passed"
+  ],
+  "browser": {
+    "tool": "existing agent-browser 0.26.0 / Chrome for Testing 148",
+    "viewports": [
+      {
+        "width": 1440,
+        "height": 1000
+      },
+      {
+        "width": 1440,
+        "height": 1100
+      },
+      {
+        "width": 390,
+        "height": 844
+      },
+      {
+        "width": 799,
+        "height": 1000
+      },
+      {
+        "width": 801,
+        "height": 1000
+      },
+      {
+        "width": 1249,
+        "height": 1000
+      },
+      {
+        "width": 1251,
+        "height": 1000
+      },
+      {
+        "width": 521,
+        "height": 900
+      },
+      {
+        "width": 519,
+        "height": 900
+      }
+    ],
+    "checks": [
+      "admin login",
+      "empty real workspace",
+      "settings groups and invalid JSON",
+      "settings save with masked secrets",
+      "125 local messages paginated",
+      "two separate text and PDF send tasks accepted by local stub",
+      "manual mode after send",
+      "AI preview without sending",
+      "ticket local stub #999",
+      "XSS content escaped, no execution",
+      "no horizontal overflow at tested widths",
+      "no browser runtime errors on successful flows",
+      "quick start defaults and all editable advanced fields preserved",
+      "agent selector via local provider stub",
+      "explicit conversation-scoped test access",
+      "model cleared in UI restores default and persists",
+      "quick start invalid JSON shows field error",
+      "quick start empty state and mobile save; no overflow at 390/519/521/799/801/1440 pixels",
+      "single customer selection via synced conversation ID; returned one user scope",
+      "pause clears scope and automatic reply; mobile/desktop screenshots inspected",
+      "custom OpenAI Responses URL visible in quick start; save and reload preserve normalized endpoint",
+      "unsafe OpenAI loopback URL rejected with HTTP 400 and visible error; saved value unchanged",
+      "blank OpenAI URL restores official default; secret input remains empty with saved flag",
+      "OpenAI address desktop/mobile screenshots inspected; no runtime errors or horizontal overflow at 390 pixels",
+      "random-code start via settings, synthetic signed webhook auto-identifies WhatsApp and WeChat separately",
+      "both channels active; WhatsApp toggle pauses only WhatsApp while WeChat follow-up adds an accepted reply",
+      "manual composer send changes WeChat to human mode; no runtime errors",
+      "pairing desktop 1440x1000 and mobile 390x844 screenshots inspected; no horizontal overflow"
+    ],
+    "screenshots_directory": "local-screenshots",
+    "network": "Local /api JSON responses inspected; no live vendor calls"
+  },
+  "real_tenant": {
+    "status": "blocked",
+    "replies_sent": 0,
+    "model_requests": 0,
+    "customer_receipts": 0,
+    "reason": "Credentials, public webhook, channel accounts and media not supplied"
+  },
+  "checks_after_restart": [
+    "configuration remained empty and masked",
+    "admin session persisted",
+    "second process rejected by file lock",
+    "empty model migrated to gpt-6-astra; auto remains off; settings HTTP 200",
+    "OpenAI address update: normal server restarted; authenticated settings HTTP 200, default URL persisted, auto off, secrets masked",
+    "2026-09-21 pairing update: authenticated discovery HTTP 200, no bindings or enrollment; auto off, secret fields masked"
+  ],
+  "inbound_isolation": {
+    "scope": "synthetic_signed_events_only",
+    "unselected_customer_events": 100,
+    "extra_rows": 0,
+    "background_jobs": 0,
+    "model_calls": 0,
+    "load_test": false
+  },
+  "quick_test_pairing": {
+    "scope": "local_synthetic_only",
+    "channels": [
+      "WhatsApp",
+      "WeChat"
+    ],
+    "ttl_seconds": 300,
+    "passed_local": true,
+    "real_tenant": "blocked",
+    "manual_acceptance_bypass": "explicit limited-account trial only; capability matrix unchanged"
+  },
+  "handoff_verification": {
+    "date": "2026-09-22",
+    "documented_default_parameters": 44,
+    "missing_parameters": 0,
+    "broken_document_links": 0,
+    "json_valid": true,
+    "pip_check": "passed",
+    "isolated_fresh_start": [
+      "env generation",
+      "existing env not overwritten",
+      "sqlite initialized",
+      "settings page HTTP 200",
+      "initial administrator login",
+      "empty masked credentials and auto off"
+    ],
+    "new_browser_run": false,
+    "prior_browser_evidence_retained": true
+  }
+}
