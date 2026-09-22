@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 from urllib.parse import urlencode
 
 from . import security
@@ -170,7 +171,8 @@ def openai(s, payload):
             headers[header] = s[key]
     base = s["openai_base_url"].rstrip("/")
     endpoint = base if base.endswith("/responses") else base + "/responses"
-    data, rh = security.json_request(endpoint, "POST", headers, payload, s["model_timeout_seconds"])
+    proxy = os.getenv("https_proxy") or os.getenv("HTTPS_PROXY") or None
+    data, rh = security.json_request(endpoint, "POST", headers, payload, s["model_timeout_seconds"], proxy=proxy)
     return data, rh.get("x-request-id", "")
 
 

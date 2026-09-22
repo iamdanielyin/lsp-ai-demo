@@ -56,7 +56,7 @@ flowchart LR
     Q -->|需要且已配置时| F[Freshdesk跟进Ticket]
 ```
 
-Webhook验签和事务完成后返回，不等待模型或平台外发。范围外事件不进入消息、会话、历史同步或AI任务表；等待识别时仅精确随机码可新增绑定。签名失败/解析失败/持久化失败不返回伪成功。
+Webhook验签和事务完成后返回，不等待模型或平台外发。范围外事件不进入消息、会话、历史同步或AI任务表；短时监听期间只缓存脱敏候选元数据，点选后才建立会话并同步历史。签名失败/解析失败/持久化失败不返回伪成功。
 
 快速绑定沿用原始事件的客户ID/会话ID/来源，白名单保存实际客户ID，额外核对来源配对。配置版本改变会取消旧任务并重新检查已绑定账号。首次绑定使普通试运行可在尚未完成手动文本验收时启用，但能力矩阵保留未验证事实。
 
@@ -104,8 +104,10 @@ tenant指纹由平台地址和Token计算；轮换平台凭证也要求重新导
 | `GET /api/status` | 路线/自动开关/本地任务统计，tenant_verified始终如实显示 |
 | `POST /api/checks` | kind=openai/platform_read/send/verify_outbound/record；发送必须明确确认；通过不能伪造 |
 | `GET /api/capabilities`、`GET /api/events` | 矩阵与当前版本检查、最近50个已接纳事件 |
-| `GET /api/test-discovery` | 当前等待码、绑定列表、独立开关状态；未使用码仅限登录管理员 |
-| `POST /api/test-discovery` | `{"channel":"WhatsApp","confirm_auto_reply":true}`；也可WeChat，生成5分钟码 |
+| `GET /api/test-discovery` | 当前监听窗口、脱敏候选、绑定列表和独立开关状态；仅限登录管理员 |
+| `POST /api/test-discovery/bind-next` | `{"channel":"WhatsApp"}`；开启5分钟短时监听，不自动回复 |
+| `POST /api/test-discovery/select` | `{"conversation_id":"<PLATFORM_CONVERSATION_ID>"}`；点选候选后读取历史并加入白名单 |
+| `POST /api/test-discovery` | 兼容旧测试码流程；`{"channel":"WhatsApp","confirm_auto_reply":true}` |
 | `PUT /api/test-discovery/mode` | `{"channel":"WeChat","enabled":false}`，该渠道账号人工接管；true明确恢复 |
 | `DELETE /api/test-discovery` | 空JSON对象，结束全部测试；不是删除平台会话 |
 | `POST /api/conversations/import` | conversation_id或user_id；手动读取真实会话，保留旧导入方式 |

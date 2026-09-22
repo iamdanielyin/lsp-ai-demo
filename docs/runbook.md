@@ -33,10 +33,26 @@ python3 -m venv .venv
 | `FILE_DIRECTORY` | `data/files` | 上传/缓存素材目录；不要用可公开浏览的静态目录 |
 | `CONFIG_MASTER_KEY` | 必填；Fernet key | 初始化脚本随机生成；保存后不要随意轮换，旧数据依赖它解密 |
 | `ADMIN_INITIAL_PASSWORD` | 首次必填，至少16字符 | 脚本随机生成；只在数据库无管理员时初始化，后续改变量不会重置已有密码 |
+| `https_proxy` / `HTTPS_PROXY` | 可选；未设置则 OpenAI 直连 | 本机 HTTP 代理，例如 `http://127.0.0.1:<PROXY_PORT>`；小写非空值优先，改变后重启 |
 
 配置文件解析是简单 `KEY=value`，不要添加引号、`export` 或内联注释。进程已存在的同名环境变量优先于 `.env`。业务 Token、模型、URL 和测试账号都通过设置页维护，不放入启动参数。
 
 首次 `run.py` 自动创建目录、SQLite表及索引、管理员哈希；不需要单独建库脚本。旧数据库的 `sync_cursor` 字段有启动兼容迁移。数据库和锁文件应保留在同一持久目录。
+
+### OpenAI 本地代理
+
+可在启动前设置环境变量，或将 `https_proxy=http://127.0.0.1:<PROXY_PORT>` 写入本机 `.env`（将占位符换为代理软件的 HTTP 端口）。例如本机代理使用7897：
+
+```bash
+export https_proxy=http://127.0.0.1:7897
+export http_proxy=http://127.0.0.1:7897
+export all_proxy=socks5://127.0.0.1:7897
+.venv/bin/python run.py
+```
+
+OpenAI 的连接检查、预览和自动回复统一读取 `https_proxy`，兼容大写 `HTTPS_PROXY`，通过 HTTP CONNECT 发送 HTTPS 请求。此处不使用 `http_proxy`、`all_proxy` 或 `NO_PROXY` 决定路由；无需安装 SOCKS 依赖。代理必须为本机 HTTP 地址，不能把 SOCKS URL 填入 `https_proxy`。Freshchat、Freshdesk 和素材下载保持直连。
+
+代理失败会明确报错，不自动退回直连；目标仍须为公网 HTTPS，CONNECT 绑定已验证的公网 IP，TLS 仍校验原目标域名。代理服务需持续运行。重启后在设置页点击“检查 OpenAI”验证实际模型和凭证；该检查有少量真实用量，不发送客户消息。
 
 ## 本机日常启动与停止
 
@@ -51,11 +67,11 @@ python3 -m venv .venv
 1. 在受控主机运行同一 `run.py`，持久保存 `.env`、SQLite与媒体目录。
 2. 使用部署环境已有的 HTTPS 反向代理或隧道，将公网域名指向该进程。证书由部署者维护；本仓库不包含生产运维编排。
 3. 转发时保留原始 Webhook body 和 Host；不要记录请求体、Cookie、Authorization、完整签名媒体路径，也不要公开数据库/上传目录。
-4. 在 Demo 保存 `public_base_url=https://<DEMO_HOST>`，无路径。重新从公网 HTTPS 登录；配置此值后Cookie启用 Secure，普通HTTP入口可能无法持续登录。
+4. 在 Demo 保存 `public_base_url=https://<DEMO_HOST>`，无路径。公网入口使用 HTTPS 和 Secure Cookie；本地 `http://127.0.0.1:<PORT>`、`http://localhost:<PORT>` 仍可登录和保存设置，不受 Webhook 地址切换影响。
 5. 将设置页的 `https://<DEMO_HOST>/api/webhooks/freshchat` 填到 Freshchat Webhooks，复制对应公钥回 Demo。详细平台操作见 [平台指引](platform-setup.md)。
-6. 生成测试码并用测试账号发送。平台真实签名事件、同一对象历史、原渠道回信全部通过后才做实际验收。
+6. 在设置页选择渠道并点击“监听下一批会话”，用测试账号发送任意普通消息；点选脱敏候选后才同步真实历史。平台真实签名事件、同一对象历史、原渠道回信全部通过后才做实际验收。
 
-当前服务不信任任意 `X-Forwarded-*`；写接口 Origin 仅接受服务 origin 或已保存公网 origin。HTTPS与 Cookie/Origin 的部署行为必须实测，不要通过取消 CSRF 来解决代理配置错误。代码出站请求直接做公网 DNS/IP 验证与 TLS，不承诺支持需要本地HTTP代理的网络环境。
+当前服务不信任任意 `X-Forwarded-*`；写接口 Origin 接受服务 origin、保留 Host 的同主机同端口 HTTPS origin，或已保存公网 origin。管理入口与 Webhook 地址可不同；更换隧道不会放行其他域名的跨站写请求，CSRF 校验始终保留。非本地入口须使用 HTTPS；隧道须保留 Host，不要通过取消 CSRF 来解决代理配置错误。所有出站请求保留公网 DNS/IP 验证与 TLS；OpenAI 可按上述启动参数使用本地 HTTP 代理。
 
 ## 配置和备份
 
@@ -74,10 +90,11 @@ python3 -m venv .venv
 | 地址打不开 / 端口占用 | 确认进程仍运行，读取 `.env` 的PORT；`lsof -nP -iTCP:8000 -sTCP:LISTEN` 仅查询，不直接结束未知服务 |
 | 登录失败 / 保存403 | 核对首次口令及已有数据库；刷新登录页，检查HTTPS、Secure Cookie和Origin；不把业务Token当登录密码 |
 | RSA公钥未配置503 / 签名401 | 从Freshchat Webhooks复制正确公钥；确认是会话Webhook，代理未改body，不使用Freshdesk自动化载荷 |
-| 测试码没反应 | 必须在5分钟内发送整段最新码到已接客服账号；检查订阅、公网可达、验签、公开客户角色和真实来源；见测试手册 |
+| 监听没有候选 | 必须在5分钟内发送公开普通消息；检查订阅、公网可达、验签、客户角色和非空 `message_source`；范围外事件不会保存；见测试手册 |
 | 识别成功但启动失败 | 查看失败原因及消息页任务；核对平台读取、坐席权限、OpenAI地址/Key/模型；修复配置后重新识别 |
 | 平台403/404 | 403核权限；404核对官方区域主机、真实ID和租户API形态。新版Ticket不能填作Freshchat会话 |
 | 自定义AI接口失败 | 必须公网HTTPS443、Responses与严格结构化输出兼容；不支持只提供Chat Completions、URL查询鉴权或API重定向 |
+| 本地 OpenAI 代理连接失败 | 检查代理软件已启动、HTTP端口可达，`https_proxy`使用本机`http://`地址；改环境变量后重启后台，再检查OpenAI |
 | 媒体不可用 / AV_PENDING | 核对上传状态、用途、渠道、大小及白名单；扫描未完成不能标可发；不反复重发结果不明项 |
 | 保存后AI关闭 | 这是配置版本失效规则；重新检查/识别，不能直接改数据库强开 |
 | 客户没收到但API成功 | 分别核对工作台、渠道限制和设备，不将HTTP2xx当送达；先查证再人工重试 |

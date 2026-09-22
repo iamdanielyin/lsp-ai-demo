@@ -84,16 +84,43 @@ def public_addresses(host):
 
 
 class PinnedHTTPS(http.client.HTTPSConnection):
+    def __init__(self, host, *, timeout=30, context=None, proxy=None):
+        super().__init__(host, timeout=timeout, context=context)
+        self.proxy = None
+        if proxy:
+            try:
+                p = urlsplit(proxy)
+                port = p.port if p.port is not None else 80
+            except ValueError:
+                raise Problem("invalid_proxy", "OpenAI 代理地址或端口格式不正确") from None
+            require(p.scheme == "http" and p.hostname in ("127.0.0.1", "localhost", "::1")
+                    and 1 <= port <= 65535 and not p.username and not p.password
+                    and p.path in ("", "/") and not p.query and not p.fragment
+                    and not re.search(r"[\s\\\x00-\x1f]", proxy),
+                    "invalid_proxy", "OpenAI 代理须为本机 HTTP 代理地址，例如 http://127.0.0.1:7897")
+            self.proxy = ("127.0.0.1" if p.hostname == "localhost" else p.hostname, port)
+
     def connect(self):
         # Connect to the address we checked; TLS still verifies the original hostname.
         addresses = public_addresses(self.host)
-        self.sock = self._context.wrap_socket(
-            socket.create_connection((addresses[0], 443), self.timeout), server_hostname=self.host)
+        if self.proxy:
+            tunnel = http.client.HTTPConnection(*self.proxy, timeout=self.timeout)
+            try:
+                tunnel.set_tunnel(addresses[0], 443)
+                tunnel.connect()
+                self.sock, tunnel.sock = tunnel.sock, None
+            except (OSError, http.client.HTTPException):
+                raise Problem("proxy_unavailable", "本地 OpenAI 代理连接失败，请检查代理服务、端口和 CONNECT 转发", 502) from None
+            finally:
+                tunnel.close()
+        else:
+            self.sock = socket.create_connection((addresses[0], 443), self.timeout)
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
 
 
-def request(url, method="GET", headers=None, body=None, timeout=30, limit=8_000_000, hosts=None, redirects=0):
+def request(url, method="GET", headers=None, body=None, timeout=30, limit=8_000_000, hosts=None, redirects=0, proxy=None):
     p = url_parts(url, hosts)
-    conn = PinnedHTTPS(p.hostname, timeout=timeout, context=ssl.create_default_context())
+    conn = PinnedHTTPS(p.hostname, timeout=timeout, context=ssl.create_default_context(), proxy=proxy)
     try:
         conn.request(method, p.path + ("?" + p.query if p.query else ""), body=body, headers=headers or {})
         response = conn.getresponse()
@@ -101,7 +128,7 @@ def request(url, method="GET", headers=None, body=None, timeout=30, limit=8_000_
         if 300 <= status < 400:
             require(method == "GET" and redirects > 0, "redirect_denied", "请求重定向已拒绝", 502)
             return request(urljoin(url, rh.get("location", "")), hosts=hosts, timeout=timeout,
-                           limit=limit, redirects=redirects - 1)
+                           limit=limit, redirects=redirects - 1, proxy=proxy)
         raw = response.read(limit + 1)
         require(len(raw) <= limit, "response_too_large", "响应或文件超过限制", 502)
         if status == 429:
@@ -120,9 +147,9 @@ def request(url, method="GET", headers=None, body=None, timeout=30, limit=8_000_
         conn.close()
 
 
-def json_request(url, method="GET", headers=None, data=None, timeout=30):
+def json_request(url, method="GET", headers=None, data=None, timeout=30, proxy=None):
     raw, rh = request(url, method, {"Accept": "application/json", "Content-Type": "application/json", **(headers or {})},
-                      json.dumps(data, ensure_ascii=False).encode() if data is not None else None, timeout)
+                      json.dumps(data, ensure_ascii=False).encode() if data is not None else None, timeout, proxy=proxy)
     try:
         result = json.loads(raw)
     except (ValueError, UnicodeError):
@@ -133,8 +160,9 @@ def json_request(url, method="GET", headers=None, data=None, timeout=30):
 
 def public_key(value):
     try:
-        key = (serialization.load_pem_public_key(value.encode()) if "BEGIN PUBLIC KEY" in value
-               else serialization.load_der_public_key(base64.b64decode(value, validate=True)))
+        value = value.strip()
+        key = (serialization.load_pem_public_key(value.encode()) if value.startswith("-----BEGIN ")
+               else serialization.load_der_public_key(base64.b64decode("".join(value.split()), validate=True)))
         require(isinstance(key, rsa.RSAPublicKey) and key.key_size >= 2048, "invalid_public_key", "需要 RSA 公钥（至少2048位）")
         return key
     except (ValueError, TypeError):

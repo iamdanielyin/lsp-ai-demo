@@ -4,7 +4,7 @@
 
 ## 本次归档复验（2026-09-22）
 
-- 全量67项自动化测试通过，Python编译、JavaScript语法和 `pip check` 通过；输出已更新。
+- 全量76项自动化测试通过，Python编译、JavaScript语法和 `pip check` 通过；输出已更新。
 - 在独立临时空目录运行初始化和 `run.py`：随机启动参数生成、已有.env拒绝覆盖、SQLite自动建库、页面HTTP200、首次管理员登录、空业务密钥及自动回复关闭均通过；临时实例已停止，没有改正常实例业务配置。
 - [需求](requirements.md)、[技术与源码导航](architecture.md)、[运行手册](runbook.md)、[全部参数](configuration-reference.md)、[测试过程](testing-guide.md) 已补齐；44个 `DEFAULTS` 参数均有独立表格项，文档链接和JSON有效。
 - 本轮为文档与仓库交付，没有新UI行为变更；下面的浏览器操作/截图记录沿用之前实际验证，未冒称本轮重新执行真实浏览器或客户渠道测试。
@@ -26,7 +26,7 @@
 
 ## 已完成的本地验证
 
-执行 `python -m unittest discover -s tests -v`：**67 项通过，0 失败，9.612 秒**。完整输出：[local-test-results.txt](local-test-results.txt)。机器可读摘要：[local-evidence.json](local-evidence.json)。Python compileall、JavaScript 语法检查通过。
+执行 `python -m unittest discover -s tests -v`：**76 项通过，0 失败，12.660 秒**。完整输出：[local-test-results.txt](local-test-results.txt)。机器可读摘要：[local-evidence.json](local-evidence.json)。Python compileall、JavaScript 语法检查通过。
 
 测试使用临时数据库、合成 RSA 签名、受控平台/模型响应，并阻止意外真实网络连接。覆盖：
 
@@ -108,6 +108,12 @@
 - 三项新增回归测试覆盖保存/回读/默认恢复、请求目标及 Responses 参数、私网/DNS/重定向拒绝；地址变更使旧检查失效并关闭自动回复，密钥保持脱敏。
 - 独立合成浏览器环境验证自定义地址保存及刷新保留、非法地址返回400且不覆盖旧值、留空恢复默认、密钥输入保持为空；浏览器无运行时错误。桌面1440×1000、手机390×844截图已检查，手机无横向溢出：`local-screenshots/openai-address-desktop.png`、`local-screenshots/openai-address-mobile.png`。
 - 尚未调用真实自定义服务；兼容性和模型权限须填写对应凭证后通过“保存并检查 OpenAI”验证。
+
+## 短时监听候选绑定（2026-09-22）
+
+- 设置页新增“监听下一批会话”：5分钟内接收公开普通消息后，只保存脱敏候选元数据（会话 ID、客户 ID、来源和时间）。未点选消息不写入消息、事件或任务表，不调用模型。
+- 管理员点选候选后才建立本地会话、加入客户白名单并排队历史同步；会话默认 AI 关闭，消息页可单独恢复或人工接管。
+- 新增回归覆盖候选去重、正文隔离、选择后绑定及单会话恢复 AI；真实渠道仍待租户验证。
 
 ## 随机测试码与双渠道自动启动（2026-09-21）
 

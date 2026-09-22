@@ -3,9 +3,9 @@
   "date": "2026-09-22",
   "unit_tests": {
     "command": ".venv/bin/python -m unittest discover -s tests -v",
-    "passed": 67,
+    "passed": 76,
     "failed": 0,
-    "duration_seconds": 9.612
+    "duration_seconds": 12.660
   },
   "syntax": [
     "python compileall passed",
@@ -76,6 +76,7 @@
       "unsafe OpenAI loopback URL rejected with HTTP 400 and visible error; saved value unchanged",
       "blank OpenAI URL restores official default; secret input remains empty with saved flag",
       "OpenAI address desktop/mobile screenshots inspected; no runtime errors or horizontal overflow at 390 pixels",
+      "short binding listener shows only redacted candidates until admin selection",
       "random-code start via settings, synthetic signed webhook auto-identifies WhatsApp and WeChat separately",
       "both channels active; WhatsApp toggle pauses only WhatsApp while WeChat follow-up adds an accepted reply",
       "manual composer send changes WeChat to human mode; no runtime errors",

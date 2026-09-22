@@ -146,7 +146,9 @@ class Service:
             c = self.conv(cid)
             s, rev = self.settings.get()
             if mode == "auto":
-                require(s["auto_reply_enabled"], "auto_disabled", "请先在设置页启用全局自动回复", 409)
+                if not s["auto_reply_enabled"]:
+                    self.send_guard(c, s)
+                    self.settings.auto_ready(s, rev, c["channel"])
                 self.send_guard(c, s)
                 self.settings.auto_ready(s, rev, c["channel"])
             self.cancel_ai(cid, "人工接管或会话模式已变化，未发送任务已取消")
@@ -176,8 +178,9 @@ class Service:
         require(isinstance(message, dict), "event_format", "该 payload 版本缺少 data.message")
         cid = identifier(message.get("conversation_id"))
         with self.db.connect():
-            if self.capture_test_message(message, cid, version, retries):
-                return {"status": "discovered"}
+            captured = self.capture_test_message(message, cid, version, retries)
+            if captured:
+                return {"status": captured if isinstance(captured, str) else "discovered"}
             c = self.db.one("SELECT * FROM conversations WHERE tenant=? AND platform_id=?", (tenant_id(s), cid))
             uid = message.get("user_id") or ""
             if uid:
@@ -208,7 +211,7 @@ class Service:
                     self.settings.record(c["channel"], "inbound", "passed", cid, {"message_id": m["platform_id"], "payload_version": version, "signature": "RSA-SHA256 verified"})
                 if c["last_customer"] == m["platform_id"]:
                     self.cancel_ai(c["id"], "客户追加消息，旧计划已取消")
-                if c["mode"] == "auto" and s["auto_reply_enabled"] and m["created"] > c["auto_since"] and c["last_customer"] == m["platform_id"]:
+                if c["mode"] == "auto" and m["created"] > c["auto_since"] and c["last_customer"] == m["platform_id"]:
                     try:
                         self.send_guard(c, s)
                         self.settings.auto_ready(s, rev, c["channel"])
@@ -224,12 +227,20 @@ class Service:
             s, revision = self.settings.get()
             row = self.db.one("SELECT value FROM meta WHERE key='test_discovery'")
             state = self.db.unseal(row["value"]) if row else {}
+            state.setdefault("bindings", {})
+            state.setdefault("enrollment", None)
+            state.setdefault("next_binding", None)
+            state.setdefault("candidates", [])
             if state.get("tenant") != tenant_id(s) or state.get("revision") != revision:
                 if row:
                     self.db.run("DELETE FROM meta WHERE key='test_discovery'")
-                return {"tenant": tenant_id(s), "revision": revision, "bindings": {}, "enrollment": None}
+                return {"tenant": tenant_id(s), "revision": revision, "bindings": {}, "enrollment": None, "next_binding": None, "candidates": []}
             if state["enrollment"] and state["enrollment"]["expires"] <= time.time():
                 state["enrollment"] = None
+                self.save_discovery(state)
+            if state["next_binding"] and state["next_binding"].get("expires", 0) <= time.time():
+                state["next_binding"] = None
+                state["candidates"] = []
                 self.save_discovery(state)
             return state
 
@@ -247,9 +258,70 @@ class Service:
             self.save_discovery(state)
             return state
 
+    def start_next_binding(self, channel):
+        require(channel in ("WhatsApp", "WeChat", "Webchat"), "invalid_channel", "请选择本次测试的实际渠道")
+        with self.db.connect():
+            s, _ = self.settings.get()
+            require(all(s[k] for k in ("platform_api_base_url", "freshchat_token", "reply_actor_id", "public_base_url", "freshchat_public_key")),
+                    "binding_not_ready", "请先保存平台、发送坐席、公网地址和验签公钥，并在平台启用 Webhook", 409)
+            state = self.discovery()
+            state["enrollment"] = None
+            state["next_binding"] = {"status": "waiting", "channel": channel, "expires": time.time() + 300}
+            state["candidates"] = []
+            self.save_discovery(state)
+            return state
+
+    def bind_observed_message(self, state, message, cid, version, retries, channel, auto_on_start=False, code_hash=""):
+        uid = message.get("user_id")
+        require(uid, "identity_missing", "Webhook 消息没有客户 ID，无法绑定测试客户", 409)
+        identifier(uid)
+        m = normalize_message(message, cid)
+        s, _ = self.settings.get()
+        source = m["source"]
+        require(source and source != "unknown" and len(source) <= 200, "source_missing", "Webhook 消息没有真实渠道来源，无法绑定", 409)
+        require(source not in s["source_mapping"] or s["source_mapping"][source] == channel,
+                "source_conflict", "此来源已对应其他渠道，请核对 Freshchat 连接器", 409)
+        old = state["bindings"].get(channel)
+        if old and old.get("local_id"):
+            self.set_mode(old["local_id"], "manual")
+        state["bindings"][channel] = {"channel": channel, "user_id": uid, "conversation_id": cid, "source": source,
+                                      "trigger_id": m["platform_id"], "code_hash": code_hash, "paused": False,
+                                      "start_ai": auto_on_start, "status": "starting"}
+        bindings = state["bindings"]
+        self.settings.save({"source_mapping": {**s["source_mapping"], source: channel}, "allowed_channels": list(bindings),
+                            "test_identity_allowlist": list(dict.fromkeys("user:" + b["user_id"] for b in bindings.values())), "auto_reply_enabled": False})
+        s, revision = self.settings.get()
+        c = self.add_conversation(cid, uid, source, m["topic_id"])
+        self.insert_message(c, m)
+        self.db.run("UPDATE conversations SET mode='off',auto_since=? WHERE id=?", (m["created"], c["id"]))
+        bindings[channel]["local_id"] = c["id"]
+        state.update(revision=revision, enrollment=None, next_binding=None, candidates=[])
+        state["activation_job"] = self.enqueue("activate_test", c, origin="setup", trigger=m["platform_id"])
+        self.save_discovery(state)
+        self.db.run("INSERT OR IGNORE INTO events(tenant,conversation,platform_id,action,version,retries,created) VALUES(?,?,?,?,?,?,?)",
+                    (c["tenant"], c["id"], m["platform_id"], "message_create", version[:80], retries[:20], time.time()))
+        return True
+
     def capture_test_message(self, message, cid, version, retries):
         state = self.discovery()
         if message.get("actor_type") != "user" or message.get("message_type") != "normal" or message.get("private") or message.get("botsPrivateNote"):
+            return False
+        pending_next = state.get("next_binding")
+        if pending_next and pending_next.get("expires", 0) <= time.time():
+            state["next_binding"] = None
+            self.save_discovery(state)
+            pending_next = None
+        if pending_next and pending_next.get("status") == "waiting":
+            m = normalize_message(message, cid)
+            if m["source"] and m["source"] != "unknown" and message.get("user_id"):
+                candidate = {"channel": pending_next["channel"], "conversation_id": cid, "user_id": m["user_id"],
+                             "source": m["source"], "trigger_id": m["platform_id"], "version": version[:80],
+                             "retries": retries[:20], "observed_at": time.time()}
+                if not any(x.get("conversation_id") == cid for x in state["candidates"]):
+                    state["candidates"].append(candidate)
+                    state["candidates"] = state["candidates"][-20:]
+                    self.save_discovery(state)
+                return "candidate"
             return False
         parts = message.get("message_parts")
         if not isinstance(parts, list) or len(parts) != 1 or not isinstance(parts[0], dict):
@@ -264,36 +336,45 @@ class Service:
         pending = state["enrollment"]
         if not pending or pending["status"] != "waiting" or text.strip() != pending["code"]:
             return False
-        uid = message.get("user_id")
-        if not uid:
+        if not message.get("user_id"):
             return False
-        identifier(uid)
+        channel = pending["channel"]
         m = normalize_message(message, cid)
         s, _ = self.settings.get()
-        source, channel = m["source"], pending["channel"]
+        source = m["source"]
         if not source or source == "unknown" or len(source) > 200 or (source in s["source_mapping"] and s["source_mapping"][source] != channel):
             pending.update(status="failed", error="来源缺失或与所选渠道冲突，请核对真实连接器后重新识别")
             self.save_discovery(state)
             return True
-        old = state["bindings"].get(channel)
-        if old:
-            self.set_mode(old["local_id"], "manual")
-        state["bindings"][channel] = {"channel": channel, "user_id": uid, "conversation_id": cid, "source": source,
-                                      "trigger_id": m["platform_id"], "code_hash": code_hash, "paused": False, "status": "starting"}
-        bindings = state["bindings"]
-        self.settings.save({"source_mapping": {**s["source_mapping"], source: channel}, "allowed_channels": list(bindings),
-                            "test_identity_allowlist": list(dict.fromkeys("user:" + b["user_id"] for b in bindings.values())), "auto_reply_enabled": False})
-        s, revision = self.settings.get()
-        c = self.add_conversation(cid, uid, source, m["topic_id"])
-        self.insert_message(c, m)
-        self.db.run("UPDATE conversations SET mode='off',auto_since=? WHERE id=?", (m["created"], c["id"]))
-        bindings[channel]["local_id"] = c["id"]
-        state.update(revision=revision, enrollment=None)
-        state["activation_job"] = self.enqueue("activate_test", c, origin="setup", trigger=m["platform_id"])
-        self.save_discovery(state)
-        self.db.run("INSERT OR IGNORE INTO events(tenant,conversation,platform_id,action,version,retries,created) VALUES(?,?,?,?,?,?,?)",
-                    (c["tenant"], c["id"], m["platform_id"], "message_create", version[:80], retries[:20], time.time()))
-        return True
+        return self.bind_observed_message(state, message, cid, version, retries, channel, True, code_hash)
+
+    def select_candidate(self, conversation_id):
+        identifier(conversation_id)
+        with self.db.connect():
+            state = self.discovery()
+            candidate = next((x for x in state.get("candidates", []) if x.get("conversation_id") == conversation_id), None)
+            require(candidate, "candidate_not_found", "候选会话不存在、已过期或已被选择", 404)
+            channel = candidate["channel"]
+            old = state["bindings"].get(channel)
+            if old and old.get("local_id"):
+                self.set_mode(old["local_id"], "manual")
+            s, _ = self.settings.get()
+            self.settings.save({"source_mapping": {**s["source_mapping"], candidate["source"]: channel},
+                                "allowed_channels": list(dict.fromkeys([*s["allowed_channels"], channel])),
+                                "test_identity_allowlist": list(dict.fromkeys([*s["test_identity_allowlist"], "user:" + candidate["user_id"]])),
+                                "auto_reply_enabled": False})
+            s, revision = self.settings.get()
+            c = self.add_conversation(candidate["conversation_id"], candidate["user_id"], candidate["source"])
+            self.db.run("UPDATE conversations SET mode='off',auto_since=? WHERE id=?", (utc(), c["id"]))
+            state["bindings"][channel] = {**candidate, "paused": True, "start_ai": False, "status": "starting", "local_id": c["id"]}
+            state["next_binding"] = None
+            state["candidates"] = []
+            state["revision"] = revision
+            state["activation_job"] = self.enqueue("activate_test", c, origin="setup", trigger=candidate["trigger_id"])
+            self.save_discovery(state)
+            self.db.run("INSERT OR IGNORE INTO events(tenant,conversation,platform_id,action,version,retries,created) VALUES(?,?,?,?,?,?,?)",
+                        (c["tenant"], c["id"], candidate["trigger_id"], "message_create", candidate["version"], candidate["retries"], time.time()))
+            return {"conversation_id": c["id"], "job_id": state["activation_job"], "channel": channel}
 
     def quick_scope(self, uid, source):
         bindings = self.discovery()["bindings"]
@@ -319,12 +400,14 @@ class Service:
         self.check_openai()
         with self.db.connect():
             state = current()
-            self.settings.save({"auto_reply_enabled": True})
+            start_ai = any(b.get("start_ai", True) for b in state["bindings"].values())
+            if start_ai:
+                self.settings.save({"auto_reply_enabled": True})
             boundary = utc()
             for b in state["bindings"].values():
                 b["status"] = "active"
                 self.db.run("UPDATE conversations SET mode=?,auto_since=? WHERE tenant=? AND user_id=? AND channel=?",
-                            ("manual" if b["paused"] else "auto", boundary, state["tenant"], b["user_id"], b["channel"]))
+                            ("manual" if b["paused"] or not b.get("start_ai", True) else "auto", boundary, state["tenant"], b["user_id"], b["channel"]))
             self.save_discovery(state)
             c = self.conv(job["conversation"])
             if c["mode"] == "auto":
@@ -337,8 +420,6 @@ class Service:
             b = state["bindings"].get(channel)
             require(b, "test_not_bound", "此渠道尚未识别测试账号", 409)
             require(not enabled or b["status"] == "active", "test_not_ready", "启动检查尚未完成，请先查看失败原因或重新识别", 409)
-            if enabled:
-                self.settings.save({"auto_reply_enabled": True})
             return self.set_mode(b["local_id"], "auto" if enabled else "manual")
 
     def import_conversation(self, platform_id, expected_user="", expected_tenant=None):
@@ -526,7 +607,7 @@ class Service:
         if job["origin"] == "ai":
             self.send_guard(c, s)
             self.settings.auto_ready(s, rev, c["channel"])
-            require(s["auto_reply_enabled"] and c["mode"] == "auto" and c["last_customer"] == job["trigger_id"], "stale_plan", "客户追加消息或人工接管，旧计划已取消", 409)
+            require(c["mode"] == "auto" and c["last_customer"] == job["trigger_id"], "stale_plan", "客户追加消息或人工接管，旧计划已取消", 409)
 
     def submit(self, job):
         with self.db.lock:

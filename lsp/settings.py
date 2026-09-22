@@ -176,9 +176,10 @@ class Settings:
         row = self.db.one("SELECT value FROM meta WHERE key='test_discovery'")
         state = self.db.unseal(row["value"]) if row else {}
         bindings = state.get("bindings", {})
-        return (channel in bindings and state.get("tenant") == tenant_id(s) and state.get("revision") == revision
-                and set(s["allowed_channels"]) == set(bindings)
-                and set(s["test_identity_allowlist"]) == {"user:" + b["user_id"] for b in bindings.values()})
+        binding = bindings.get(channel)
+        return (binding and binding.get("status") in ("active", "starting") and state.get("tenant") == tenant_id(s)
+                and state.get("revision") == revision and channel in s["allowed_channels"]
+                and "user:" + binding.get("user_id", "") in s["test_identity_allowlist"])
 
 
     def record(self, channel, capability, status, target, evidence, job_id=None, revision=None, tenant=None):

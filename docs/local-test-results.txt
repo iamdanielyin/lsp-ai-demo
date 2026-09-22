@@ -24,6 +24,7 @@ test_full_history_pagination_over_50_and_dedup (test_demo.DemoTests.test_full_hi
 test_history_failure_never_claims_complete (test_demo.DemoTests.test_history_failure_never_claims_complete) ... ok
 test_http_redirect_target_revalidated (test_demo.DemoTests.test_http_redirect_target_revalidated) ... ok
 test_invalid_plans_unknown_asset_empty_and_extra_fields (test_demo.DemoTests.test_invalid_plans_unknown_asset_empty_and_extra_fields) ... ok
+test_local_http_cookies_work_with_public_webhook_configured (test_demo.DemoTests.test_local_http_cookies_work_with_public_webhook_configured) ... ok
 test_malformed_signed_payload_and_cross_conversation_history (test_demo.DemoTests.test_malformed_signed_payload_and_cross_conversation_history) ... ok
 test_manual_takeover_and_partial_send_sequence (test_demo.DemoTests.test_manual_takeover_and_partial_send_sequence) ... ok
 test_manual_unknown_retry_requires_risk_ack (test_demo.DemoTests.test_manual_unknown_retry_requires_risk_ack) ... ok
@@ -33,6 +34,10 @@ test_missing_message_id_is_unknown_not_accepted (test_demo.DemoTests.test_missin
 test_network_unknown_restart_does_not_resend (test_demo.DemoTests.test_network_unknown_restart_does_not_resend) ... ok
 test_new_conversation_uses_global_enable_boundary (test_demo.DemoTests.test_new_conversation_uses_global_enable_boundary) ... ok
 test_older_event_does_not_cancel_or_regenerate_newest (test_demo.DemoTests.test_older_event_does_not_cancel_or_regenerate_newest) ... ok
+test_only_openai_uses_https_proxy_environment (test_demo.DemoTests.test_only_openai_uses_https_proxy_environment) ... ok
+test_openai_proxy_connect_pins_public_ip_and_preserves_tls_and_host (test_demo.DemoTests.test_openai_proxy_connect_pins_public_ip_and_preserves_tls_and_host) ... ok
+test_openai_proxy_failure_never_falls_back_to_direct (test_demo.DemoTests.test_openai_proxy_failure_never_falls_back_to_direct) ... ok
+test_openai_proxy_rejects_unsafe_config_and_private_target (test_demo.DemoTests.test_openai_proxy_rejects_unsafe_config_and_private_target) ... ok
 test_outbound_evidence_requires_all_three_layers (test_demo.DemoTests.test_outbound_evidence_requires_all_three_layers) ... ok
 test_pairing_expiry_rotation_configuration_and_stop (test_demo.DemoTests.test_pairing_expiry_rotation_configuration_and_stop) ... ok
 test_pairing_filters_signature_roles_other_customers_and_consumed_code (test_demo.DemoTests.test_pairing_filters_signature_roles_other_customers_and_consumed_code) ... ok
@@ -44,16 +49,20 @@ test_pairing_source_conflict_and_model_failure_do_not_send (test_demo.DemoTests.
 test_pairing_stop_during_model_check_cannot_reenable_or_send (test_demo.DemoTests.test_pairing_stop_during_model_check_cannot_reenable_or_send) ... ok
 test_pairing_two_channels_activate_without_faking_acceptance_and_takeover (test_demo.DemoTests.test_pairing_two_channels_activate_without_faking_acceptance_and_takeover) ... ok
 test_platform_credential_change_clears_test_scope (test_demo.DemoTests.test_platform_credential_change_clears_test_scope) ... ok
+test_public_key_rejects_invalid_private_non_rsa_and_weak_keys (test_demo.DemoTests.test_public_key_rejects_invalid_private_non_rsa_and_weak_keys) ... ok
 test_quick_start_agents_pagination_filtering_and_errors (test_demo.DemoTests.test_quick_start_agents_pagination_filtering_and_errors) ... ok
 test_quick_start_model_defaults_and_existing_config_migration (test_demo.DemoTests.test_quick_start_model_defaults_and_existing_config_migration) ... ok
 test_quick_start_test_scope_is_explicit_idempotent_and_tenant_bound (test_demo.DemoTests.test_quick_start_test_scope_is_explicit_idempotent_and_tenant_bound) ... ok
 test_responses_iterate_refusal_incomplete_and_invalid_json (test_demo.DemoTests.test_responses_iterate_refusal_incomplete_and_invalid_json) ... ok
 test_roles_self_echo_private_system_do_not_generate (test_demo.DemoTests.test_roles_self_echo_private_system_do_not_generate) ... ok
+test_rsa_public_key_formats_save_and_verify_webhooks (test_demo.DemoTests.test_rsa_public_key_formats_save_and_verify_webhooks) ... ok
 test_safe_429_has_delayed_bounded_retry (test_demo.DemoTests.test_safe_429_has_delayed_bounded_retry) ... ok
 test_scheduler_auth_bodies_dry_run_execution_no_sensitive_data (test_demo.DemoTests.test_scheduler_auth_bodies_dry_run_execution_no_sensitive_data) ... ok
 test_scheduler_lock_and_unknown_skip (test_demo.DemoTests.test_scheduler_lock_and_unknown_skip) ... ok
 test_selected_customer_reopen_and_agent_without_user_id (test_demo.DemoTests.test_selected_customer_reopen_and_agent_without_user_id) ... ok
 test_settings_encryption_masking_clear_restart (test_demo.DemoTests.test_settings_encryption_masking_clear_restart) ... ok
+test_settings_origin_through_tunnel_and_local_entry (test_demo.DemoTests.test_settings_origin_through_tunnel_and_local_entry) ... ok
+test_short_binding_listens_for_redacted_candidates_then_selects_one (test_demo.DemoTests.test_short_binding_listens_for_redacted_candidates_then_selects_one) ... ok
 test_signature_raw_bytes_missing_and_tamper (test_demo.DemoTests.test_signature_raw_bytes_missing_and_tamper) ... ok
 test_single_customer_selection_replaces_scope_and_cancels_pending_work (test_demo.DemoTests.test_single_customer_selection_replaces_scope_and_cancels_pending_work) ... ok
 test_sync_cursor_ignores_newer_webhook_and_fills_gap (test_demo.DemoTests.test_sync_cursor_ignores_newer_webhook_and_fills_gap) ... ok
@@ -67,6 +76,6 @@ test_webhook_atomic_persist_failure (test_demo.DemoTests.test_webhook_atomic_per
 test_wrong_channel_cannot_send_and_not_support_false_switch (test_demo.DemoTests.test_wrong_channel_cannot_send_and_not_support_false_switch) ... ok
 
 ----------------------------------------------------------------------
-Ran 67 tests in 9.612s
+Ran 76 tests in 12.660s
 
 OK

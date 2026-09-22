@@ -3,15 +3,17 @@ import base64
 import copy
 import io
 import json
+import os
+import ssl
 import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 
 from lsp.app import create_app
 from lsp import providers, security
@@ -110,6 +112,40 @@ class DemoTests(unittest.TestCase):
         self.svc.settings.save({'clear_secrets':['openai_api_key']})
         self.assertEqual(self.call('/api/test-discovery',data={'channel':'WhatsApp','confirm_auto_reply':True}).status_code,409)
         self.assertEqual(self.db.one('SELECT count(*) n FROM jobs')['n'],0)
+
+    def test_short_binding_listens_for_redacted_candidates_then_selects_one(self):
+        started = self.call('/api/test-discovery/bind-next', data={'channel': 'WhatsApp'})
+        self.assertEqual(started.status_code, 200, started.json)
+        msg = self.message('candidate-1', conversation_id='candidate-conv', user_id='candidate-user',
+                           message_source='whatsapp', message_parts=[{'text': {'content': '真实客户问题'}}])
+        result = self.webhook(self.event(msg))
+        self.assertEqual(result.json, {'status': 'candidate'})
+        self.assertEqual(self.db.one('SELECT count(*) n FROM messages')['n'], 0)
+        self.assertEqual(self.db.one('SELECT count(*) n FROM events')['n'], 0)
+        self.assertEqual(self.db.one('SELECT count(*) n FROM jobs')['n'], 0)
+        public = self.call('/api/test-discovery', 'GET').json
+        self.assertEqual(len(public['candidates']), 1)
+        self.assertNotIn('真实客户问题', json.dumps(public, ensure_ascii=False))
+        self.assertEqual(self.webhook(self.event(msg)).json, {'status': 'candidate'})
+        self.assertEqual(len(self.call('/api/test-discovery', 'GET').json['candidates']), 1)
+
+        selected = self.call('/api/test-discovery/select', data={'conversation_id': 'candidate-conv'})
+        self.assertEqual(selected.status_code, 200, selected.json)
+        local = self.svc.conv(selected.json['conversation_id'])
+        self.assertEqual(local['user_id'], 'candidate-user')
+        self.assertEqual(local['mode'], 'off')
+        self.assertIn('user:candidate-user', self.svc.settings.get()[0]['test_identity_allowlist'])
+        self.assertEqual(self.db.one("SELECT count(*) n FROM jobs WHERE kind='activate_test'")['n'], 1)
+        self.assertEqual(self.db.one("SELECT count(*) n FROM jobs WHERE kind='sync'")['n'], 0)
+        with patch('lsp.providers.conversation', return_value={'conversation_id': 'candidate-conv'}), \
+             patch('lsp.providers.history_pages', return_value=iter([[msg]])), \
+             patch('lsp.providers.openai', return_value=(self.model_response(), 'candidate-openai')):
+            self.assertEqual(self.svc.drain(20)['failed'], 0)
+        self.assertFalse(self.svc.settings.get()[0]['auto_reply_enabled'])
+        switched = self.call('/api/conversations/%s/mode' % local['id'], method='PUT', data={'mode': 'auto'})
+        self.assertEqual(switched.status_code, 200, switched.json)
+        self.assertEqual(self.svc.conv(local['id'])['mode'], 'auto')
+        self.assertEqual(self.call('/api/test-discovery/select', data={'conversation_id': 'candidate-conv'}).status_code, 404)
 
     def test_pairing_filters_signature_roles_other_customers_and_consumed_code(self):
         start=self.call('/api/test-discovery',data={'channel':'WhatsApp','confirm_auto_reply':True}).json
@@ -329,6 +365,52 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(self.call('/api/settings','PUT',{'platform_api_base_url':'http://127.0.0.1'}).status_code,400)
         self.assertEqual(self.call('/api/settings','PUT',{'max_safe_retries':True}).status_code,400)
 
+    def test_settings_origin_through_tunnel_and_local_entry(self):
+        # A second tunnel may serve the UI while public_base_url points at the webhook tunnel.
+        for base,origin in [
+            ('http://previous-tunnel.example','https://previous-tunnel.example'),
+            ('http://previous-tunnel.example:443','https://previous-tunnel.example'),
+            ('http://127.0.0.1:8127','http://127.0.0.1:8127'),
+            ('http://localhost:8127','http://localhost:8127'),
+            ('http://[::1]:8127','http://[::1]:8127'),
+            ('http://[::1]:443','https://[::1]'),
+            ('http://127.0.0.1:8127','https://demo.example.com'),
+        ]:
+            with self.subTest(base=base,origin=origin):
+                client=self.app.test_client()
+                nonce=client.get('/api/auth',base_url=base).json['csrf']
+                login=client.post('/api/login',base_url=base,json={'password':self.config['ADMIN_INITIAL_PASSWORD']},
+                                  headers={'X-CSRF-Token':nonce,'Origin':origin})
+                self.assertEqual(login.status_code,200,login.json)
+                headers={'X-CSRF-Token':login.json['csrf'],'Origin':origin}
+                saved=client.put('/api/settings',base_url=base,json={},headers=headers)
+                self.assertEqual(saved.status_code,200,saved.json)
+                self.assertEqual(saved.json['values']['public_base_url'],'https://demo.example.com')
+                self.assertEqual(saved.json['values']['freshchat_token'],'')
+                self.assertEqual(client.put('/api/settings',base_url=base,json={},headers={'Origin':origin}).json['error'],'csrf_invalid')
+                for foreign in ('null','https://evil.example','https://previous-tunnel.example.evil.example',
+                                'https://previous-tunnel.example:8443'):
+                    rejected=client.put('/api/settings',base_url=base,json={},headers={**headers,'Origin':foreign,
+                        'X-Forwarded-Host':'evil.example','X-Forwarded-Proto':'https'})
+                    self.assertEqual(rejected.status_code,403,rejected.json)
+                    self.assertEqual(rejected.json['error'],'origin_invalid')
+                self.assertEqual(client.post('/api/logout',base_url=base,json={},headers=headers).status_code,200)
+
+    def test_local_http_cookies_work_with_public_webhook_configured(self):
+        for base,secure in [('http://localhost:8127',False),('http://127.0.0.1:8127',False),
+                            ('http://[::1]:8127',False),('https://localhost:8127',True),
+                            ('http://demo.example.com',True),('https://demo.example.com',True)]:
+            with self.subTest(base=base):
+                client=self.app.test_client()
+                auth=client.get('/api/auth',base_url=base)
+                self.assertEqual('; Secure' in auth.headers['Set-Cookie'],secure)
+                login=client.post('/api/login',base_url=base,json={'password':self.config['ADMIN_INITIAL_PASSWORD']},
+                                  headers={'X-CSRF-Token':auth.json['csrf']})
+                self.assertEqual(login.status_code,200,login.json)
+                self.assertEqual('; Secure' in login.headers['Set-Cookie'],secure)
+                self.assertIn('HttpOnly',login.headers['Set-Cookie'])
+                self.assertIn('SameSite=Strict',login.headers['Set-Cookie'])
+
     def test_unselected_customers_never_persist_or_enqueue_even_with_same_marker(self):
         self.enable()
         tables=('conversations','messages','events','jobs','logs','checks','usage','tickets')
@@ -415,6 +497,42 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(self.webhook(mutate=True).status_code,401)
         self.assertEqual(self.webhook().status_code,200)
         self.assertEqual(self.db.one('SELECT version FROM events')['version'],'test-1')
+
+    def test_rsa_public_key_formats_save_and_verify_webhooks(self):
+        key=self.rsa.public_key()
+        pkcs1=key.public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.PKCS1).decode()
+        # Some copied public keys have an RSA PEM label around SubjectPublicKeyInfo DER.
+        rsa_label=self.pem.replace('BEGIN PUBLIC KEY','BEGIN RSA PUBLIC KEY').replace('END PUBLIC KEY','END RSA PUBLIC KEY')
+        der=key.public_bytes(serialization.Encoding.DER,serialization.PublicFormat.SubjectPublicKeyInfo)
+        formats=[self.pem,pkcs1,rsa_label,'\r\n '+rsa_label.replace('\n','\r\n')+' \r\n',
+                 base64.b64encode(der).decode(),base64.encodebytes(der).decode(),
+                 base64.b64encode(key.public_bytes(serialization.Encoding.DER,serialization.PublicFormat.PKCS1)).decode()]
+        for i,value in enumerate(formats):
+            with self.subTest(format=i):
+                saved=self.call('/api/settings','PUT',{'freshchat_public_key':value})
+                self.assertEqual(saved.status_code,200,saved.json)
+                self.assertEqual(security.public_key(value).public_numbers(),key.public_numbers())
+                self.assertEqual(self.webhook(signature=False).json['error'],'invalid_signature')
+                self.assertEqual(self.webhook(mutate=True).json['error'],'invalid_signature')
+                accepted=self.webhook(self.event(self.message('key-format-'+str(i))))
+                self.assertEqual(accepted.status_code,200,accepted.json)
+                self.assertEqual(accepted.json['status'],'accepted')
+
+    def test_public_key_rejects_invalid_private_non_rsa_and_weak_keys(self):
+        private=self.rsa.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption()).decode()
+        weak=rsa.generate_private_key(public_exponent=65537,key_size=1024).public_key()
+        non_rsa=ec.generate_private_key(ec.SECP256R1()).public_key()
+        invalid=['not a key','-----BEGIN RSA PUBLIC KEY-----\ninvalid!\n-----END RSA PUBLIC KEY-----',
+                 self.pem.replace('END PUBLIC KEY','END RSA PUBLIC KEY'),private]
+        invalid += [key.public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo).decode()
+                    for key in (weak,non_rsa)]
+        previous=self.svc.settings.get()
+        for i,value in enumerate(invalid):
+            with self.subTest(format=i):
+                saved=self.call('/api/settings','PUT',{'freshchat_public_key':value})
+                self.assertEqual(saved.status_code,400,saved.json)
+                self.assertEqual(saved.json['error'],'invalid_public_key')
+                self.assertEqual(self.svc.settings.get(),previous)
 
     def test_dedup_event_and_task(self):
         self.enable()
@@ -613,6 +731,83 @@ class DemoTests(unittest.TestCase):
             self.assertTrue(args[3]['text']['format']['strict'])
             self.assertEqual(result.json['request_id'],'local-custom-url-check')
             self.assertNotIn('synthetic-openai-key',json.dumps(result.json))
+
+    def test_only_openai_uses_https_proxy_environment(self):
+        s,_=self.svc.settings.get()
+        for lower,upper,expected in [('http://127.0.0.1:7897','http://127.0.0.1:9999','http://127.0.0.1:7897'),
+                                     ('','http://127.0.0.1:7897','http://127.0.0.1:7897'),('','',None)]:
+            with self.subTest(lower=lower,upper=upper),patch.dict(os.environ,{'https_proxy':lower,'HTTPS_PROXY':upper,
+                    'http_proxy':'http://127.0.0.1:7897','all_proxy':'socks5://127.0.0.1:7897'}), \
+                    patch('lsp.security.json_request',return_value=({},{})) as request:
+                providers.openai(s,{'store':False})
+                self.assertEqual(request.call_args.kwargs.get('proxy'),expected)
+                providers.freshchat(s,'/agents')
+                self.assertIsNone(request.call_args.kwargs.get('proxy'))
+                providers.freshdesk(s,'/tickets')
+                self.assertIsNone(request.call_args.kwargs.get('proxy'))
+
+    def test_openai_proxy_connect_pins_public_ip_and_preserves_tls_and_host(self):
+        tunnel=Mock()
+        tunnel.makefile.return_value=io.BytesIO(b'HTTP/1.1 200 Connection established\r\n\r\n')
+        tls=Mock()
+        tls.makefile.return_value=io.BytesIO(b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}')
+        context=ssl.create_default_context()
+        self.assertTrue(context.check_hostname)
+        self.assertEqual(context.verify_mode,ssl.CERT_REQUIRED)
+        with patch('lsp.security.public_addresses',return_value=['8.8.8.8']) as resolve, \
+             patch('socket.create_connection',return_value=tunnel) as connect, \
+             patch('ssl.create_default_context',return_value=context), \
+             patch.object(context,'wrap_socket',return_value=tls) as wrap:
+            data,_=security.json_request('https://api.openai.com/v1/responses','POST',
+                {'Authorization':'Bearer synthetic-key'},{'store':False},proxy='http://127.0.0.1:7897')
+        self.assertEqual(data,{})
+        resolve.assert_called_once_with('api.openai.com')
+        self.assertEqual(connect.call_args.args[0],('127.0.0.1',7897))
+        wrap.assert_called_once_with(tunnel,server_hostname='api.openai.com')
+        connect_bytes=b''.join(call.args[0] for call in tunnel.sendall.call_args_list)
+        self.assertIn(b'CONNECT 8.8.8.8:443 HTTP/',connect_bytes)
+        self.assertNotIn(b'synthetic-key',connect_bytes)
+        encrypted_bytes=b''.join(call.args[0] for call in tls.sendall.call_args_list)
+        self.assertIn(b'Host: api.openai.com\r\n',encrypted_bytes)
+        self.assertIn(b'Authorization: Bearer synthetic-key\r\n',encrypted_bytes)
+        tls.close.assert_called_once()
+
+    def test_openai_proxy_rejects_unsafe_config_and_private_target(self):
+        for proxy in ('socks5://127.0.0.1:7897','http://evil.example:7897','http://192.168.1.1:7897',
+                      'http://user:secret@127.0.0.1:7897','http://127.0.0.1:bad',
+                      'http://127.0.0.1:0','http://127.0.0.1:7897/path','http://127.0.0.1:7897?key=secret'):
+            with self.subTest(proxy=proxy),patch('socket.create_connection') as connect:
+                with self.assertRaises(security.Problem) as error:
+                    security.request('https://api.openai.com/v1/responses',proxy=proxy)
+                self.assertEqual(error.exception.code,'invalid_proxy')
+                self.assertNotIn('secret',error.exception.message)
+                connect.assert_not_called()
+        with patch('socket.getaddrinfo',return_value=[(2,1,6,'',('127.0.0.1',443))]), \
+             patch('socket.create_connection') as connect:
+            with self.assertRaises(security.Problem) as error:
+                security.request('https://gateway.example/responses',proxy='http://127.0.0.1:7897')
+            self.assertEqual(error.exception.code,'private_host')
+            connect.assert_not_called()
+
+    def test_openai_proxy_failure_never_falls_back_to_direct(self):
+        with patch('lsp.security.public_addresses',return_value=['8.8.8.8']), \
+             patch('socket.create_connection',side_effect=ConnectionRefusedError) as connect:
+            with self.assertRaises(security.Problem) as error:
+                security.request('https://api.openai.com/v1/responses','POST',proxy='http://127.0.0.1:7897')
+            self.assertEqual(error.exception.code,'proxy_unavailable')
+            self.assertEqual(connect.call_count,1)
+            self.assertEqual(connect.call_args.args[0],('127.0.0.1',7897))
+        tunnel=Mock()
+        tunnel.makefile.return_value=io.BytesIO(b'HTTP/1.1 200 Connection established\r\n\r\n')
+        context=ssl.create_default_context()
+        with patch('lsp.security.public_addresses',return_value=['8.8.8.8']), \
+             patch('socket.create_connection',return_value=tunnel) as connect, \
+             patch('ssl.create_default_context',return_value=context), \
+             patch.object(context,'wrap_socket',side_effect=ssl.SSLCertVerificationError):
+            with self.assertRaises(security.Problem):
+                security.request('https://api.openai.com/v1/responses','POST',proxy='http://127.0.0.1:7897')
+            self.assertEqual(connect.call_count,1)
+            tunnel.close.assert_called_once()
 
     def test_custom_openai_rejects_unsafe_urls_private_dns_and_redirects(self):
         for url in ('http://gateway.example/v1','https://127.0.0.1/v1','https://169.254.169.254/v1',

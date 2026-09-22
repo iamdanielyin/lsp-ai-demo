@@ -34,6 +34,8 @@ Freshchat/Freshdesk官方域名后缀的当前允许列表见 `lsp/security.py`�
 | `webhook_path` | `/api/webhooks/freshchat`，只读派生字段 | 完整地址由页面拼接复制到Freshchat **设置 → Webhooks**；订阅 `message_create`。不能编辑或PUT保存此字段 |
 | `freshchat_public_key` | 空；接收Webhook必填 | Freshchat Webhooks页面提供的RSA公钥，PEM或Base64 DER，至少2048位，最长20000字符。不是私钥、API Token或共享密码 |
 
+验签公钥支持 `BEGIN PUBLIC KEY`、`BEGIN RSA PUBLIC KEY` 的 PEM，以及可换行的 Base64 DER；可原样粘贴平台公钥，无需手工改标头。程序按实际编码解析，只接受至少2048位的 RSA 公钥，拒绝私钥、损坏数据及其他密钥类型。
+
 Freshchat请求应包含 `X-Freshchat-Signature`；程序记录 `X-Freshchat-Payload-Version` 和 `X-Retry-Count`，重试次数不代替消息去重。当前无需、也不显示 `freshdesk_webhook_secret`，因为没有实现Ticket事件路线。首次设置公钥前的回调会503；配置后再发送测试码。
 
 ## OpenAI 与客服内容

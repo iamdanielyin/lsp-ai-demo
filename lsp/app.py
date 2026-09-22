@@ -52,7 +52,8 @@ def create_app(config=None, start_worker=True):
         return data
 
     def secure_cookie():
-        return request.is_secure or bool(service.settings.get()[0]["public_base_url"])
+        local = urlsplit(request.host_url).hostname in ("localhost", "127.0.0.1", "::1")
+        return request.is_secure or not local
 
     @app.before_request
     def auth():
@@ -72,7 +73,11 @@ def create_app(config=None, start_worker=True):
     def check_origin():
         origin = request.headers.get("Origin")
         s, _ = service.settings.get()
-        require(not origin or origin in (request.host_url.rstrip("/"), s["public_base_url"]), "origin_invalid", "请求来源不允许", 403)
+        # TLS ends at the tunnel; Host still identifies the browser's destination.
+        # Do not trust X-Forwarded-* or tie the admin entry to the webhook URL.
+        https_origin = "https://" + request.host.removesuffix(":443")
+        allowed = (request.host_url.rstrip("/"), https_origin, s["public_base_url"])
+        require(not origin or origin in allowed, "origin_invalid", "请求来源不允许，请从本地地址或已配置的公网地址打开；隧道须保留 Host", 403)
 
     @app.after_request
     def headers(response):
@@ -260,13 +265,28 @@ def create_app(config=None, start_worker=True):
                     service.settings.save({"test_identity_allowlist": [], "auto_reply_enabled": False})
                     db.run("DELETE FROM meta WHERE key='test_discovery'")
             state = service.discovery()
-        result = {"enrollment": state["enrollment"], "bindings": []}
+        result = {"enrollment": state["enrollment"], "next_binding": state.get("next_binding"),
+                  "candidates": [{k: c[k] for k in ("channel", "conversation_id", "user_id", "source", "observed_at")}
+                                 for c in state.get("candidates", [])], "bindings": []}
         s, _ = service.settings.get()
         for b in state["bindings"].values():
             c = service.conv(b["local_id"])
             result["bindings"].append({k: v for k, v in b.items() if k not in ("code_hash", "trigger_id")})
-            result["bindings"][-1]["enabled"] = bool(s["auto_reply_enabled"] and not b["paused"] and c["mode"] == "auto")
+            result["bindings"][-1]["enabled"] = bool(not b["paused"] and c["mode"] == "auto")
         return jsonify(result)
+
+    @app.post("/api/test-discovery/bind-next")
+    def bind_next():
+        data = body()
+        require(set(data) == {"channel"} and isinstance(data["channel"], str), "invalid_body", "请指定要监听的实际渠道")
+        state = service.start_next_binding(data["channel"])
+        return jsonify(next_binding=state["next_binding"], candidates=[])
+
+    @app.post("/api/test-discovery/select")
+    def select_candidate():
+        data = body()
+        require(set(data) == {"conversation_id"} and isinstance(data["conversation_id"], str), "invalid_body", "请指定候选会话 ID")
+        return jsonify(service.select_candidate(data["conversation_id"]))
 
     @app.put("/api/test-discovery/mode")
     def test_mode():
