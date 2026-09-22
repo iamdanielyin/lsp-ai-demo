@@ -265,7 +265,7 @@ function renderConversationList() {
   $$('.conversation-item').forEach(b=>buttonAction(b,async()=>{if(S.drafts.length||$('#message-text')?.value){if(!confirm('切换会话将清空当前未发送草稿，继续？'))return;}S.drafts=[];S.selected=Number(b.dataset.id);S.detail=null;S.limit=50;await refreshConversations(true);}));
 }
 function emptyConversation() {
-  $('#message-pane').innerHTML=`<div class="empty"><div class="empty-symbol">↔</div><div class="eyebrow">READY WHEN YOU ARE</div><h2>${S.conversations.length?'选择一个会话开始验证':'从第一条真实消息开始'}</h2><p>在设置页生成测试码，用自己的账号发送，<br>自动识别 WhatsApp / WeChat 会话后即可验证。</p><button class="primary" id="empty-import">导入测试会话</button><div class="step-list"><span><b>1</b>配置平台</span><span><b>2</b>接收事件</span><span><b>3</b>核对回复</span></div></div>`;
+  $('#message-pane').innerHTML=`<div class="empty"><div class="empty-symbol">↔</div><div class="eyebrow">READY WHEN YOU ARE</div><h2>${S.conversations.length?'选择一个会话开始验证':'从第一条真实消息开始'}</h2><p>在设置页监听下一批会话，用自己的账号发送普通消息，<br>点选候选后即可读取历史并验证。</p><button class="primary" id="empty-import">导入测试会话</button><div class="step-list"><span><b>1</b>配置平台</span><span><b>2</b>接收事件</span><span><b>3</b>核对回复</span></div></div>`;
   $('#inspector').innerHTML=`<div class="inspector-section"><h3>AI 助理</h3>${pill('','未选择会话')}<p class="muted">生成预览不外发。开启自动回复前，先完成当前渠道的能力验证。</p></div><div class="inspector-section"><h3>验证的三个层次</h3><p class="muted">01　API 受理及消息 ID<br>02　Omni 原时间线可见<br>03　客户原渠道实际收到</p></div><div class="inspector-section"><h3>人工优先</h3><p class="muted">提交手动消息会暂停 AI。已在途请求无法撤回，其余未发送任务取消。</p></div>`;
   buttonAction($('#empty-import'),importModal);
 }
