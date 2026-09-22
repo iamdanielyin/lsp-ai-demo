@@ -147,6 +147,100 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(self.svc.conv(local['id'])['mode'], 'auto')
         self.assertEqual(self.call('/api/test-discovery/select', data={'conversation_id': 'candidate-conv'}).status_code, 404)
 
+    def test_selected_agent_auto_collects_new_conversation_and_exposes_event_payload(self):
+        self.svc.settings.save({'test_identity_allowlist': []})
+        resumed = self.call('/api/settings', method='PUT', data={'reply_actor_id': 'agent-self'})
+        self.assertEqual(resumed.status_code, 200, resumed.json)
+        msg = self.message('inbox-1', conversation_id='inbox-conv', user_id='inbox-user',
+                           message_source='web', message_parts=[{'text': {'content': '新的客户问题'}}])
+        result = self.webhook(self.event(msg))
+        self.assertEqual(result.json['status'], 'accepted')
+        conversation = self.db.one("SELECT * FROM conversations WHERE platform_id='inbox-conv'")
+        self.assertEqual(conversation['mode'], 'off')
+        self.assertEqual(self.db.one("SELECT count(*) n FROM jobs WHERE kind='sync' AND conversation=?", (conversation['id'],))['n'], 1)
+        events = self.call('/api/events', method='GET').json['events']
+        self.assertEqual(events[0]['platform_id'], 'inbox-1')
+        self.assertEqual(events[0]['payload']['data']['message']['conversation_id'], 'inbox-conv')
+        self.assertIn('新的客户问题', json.dumps(events[0]['payload'], ensure_ascii=False))
+        self.assertEqual(self.db.one("SELECT count(*) n FROM jobs WHERE kind='generate'")['n'], 0)
+        with patch('lsp.providers.conversation', return_value={'conversation_id': 'inbox-conv'}), \
+             patch('lsp.providers.history_pages', return_value=iter([[msg]])):
+            self.assertEqual(self.svc.drain(20)['failed'], 0)
+        self.svc.settings.record('*', 'openai', 'passed', 'synthetic', {'local_only': True})
+        switched = self.call('/api/conversations/%s/mode' % conversation['id'], method='PUT', data={'mode': 'auto'})
+        self.assertEqual(switched.status_code, 200, switched.json)
+        self.assertEqual(self.svc.conv(conversation['id'])['mode'], 'auto')
+        self.assertFalse(self.svc.settings.get()[0]['auto_reply_enabled'])
+
+        # Known conversation agent events must still cancel AI without a customer allowlist.
+        self.webhook(self.event({**msg, 'id': 'inbox-followup'}))
+        self.assertEqual(self.webhook(self.event({**msg, 'id': 'inbox-followup'})).json['status'], 'duplicate')
+        agent = {**msg, 'id': 'human-reply', 'actor_type': 'agent', 'actor_id': 'agent-other'}
+        agent.pop('user_id')
+        self.assertEqual(self.webhook(self.event(agent)).json['status'], 'accepted')
+        self.assertEqual(self.svc.conv(conversation['id'])['mode'], 'manual')
+        self.assertEqual(self.db.one("SELECT count(*) n FROM jobs WHERE origin='ai' AND state IN ('queued','pending')")['n'], 0)
+
+    def test_auto_discovery_second_channel_does_not_reset_first_conversation(self):
+        self.svc.settings.save({'test_identity_allowlist': [], 'allowed_channels': [], 'source_mapping': {'whatsapp': 'WhatsApp'}})
+        self.call('/api/settings', method='PUT', data={'reply_actor_id': 'agent-self'})
+        self.svc.settings.record('*', 'openai', 'passed', 'synthetic', {'local_only': True})
+        revision = self.svc.settings.get()[1]
+        for channel in ('whatsapp', 'wechat'):
+            msg = self.message(channel, conversation_id=channel, user_id='user-'+channel, message_source=channel)
+            self.assertEqual(self.webhook(self.event(msg)).json['status'], 'accepted')
+            c = self.db.one('SELECT * FROM conversations WHERE platform_id=?', (channel,))
+            self.assertEqual(c['mode'], 'off')
+            with patch('lsp.providers.conversation', return_value={'conversation_id': channel}), \
+                 patch('lsp.providers.history_pages', return_value=iter([[msg]])):
+                self.svc.drain()
+            switched = self.call('/api/conversations/%s/mode' % c['id'], 'PUT', {'mode': 'auto'})
+            self.assertEqual(switched.status_code, 200, switched.json)
+            self.assertEqual(self.svc.settings.get()[1], revision)
+        self.assertEqual(self.db.one("SELECT count(*) n FROM conversations WHERE mode='auto'")['n'], 2)
+        first = self.db.one("SELECT id FROM conversations WHERE platform_id='whatsapp'")['id']
+        self.call('/api/conversations/%s/mode' % first, 'PUT', {'mode': 'manual'})
+        self.assertEqual(self.db.one("SELECT mode FROM conversations WHERE platform_id='wechat'")['mode'], 'auto')
+        self.call('/api/test-discovery', 'DELETE')
+        self.assertEqual(self.db.one("SELECT count(*) n FROM conversations WHERE mode='auto'")['n'], 0)
+        self.assertEqual(self.webhook().json['status'], 'ignored')
+
+    def test_auto_discovery_assignment_roles_and_pause(self):
+        self.svc.settings.save({'test_identity_allowlist': []})
+        self.call('/api/settings', method='PUT', data={'reply_actor_id': 'agent-self'})
+        msg = self.message('new-customer', conversation_id='new-customer', user_id='new-customer')
+        with patch('lsp.providers.conversation') as read:
+            for extra in ({'assigned_agent_id': 'agent-other'}, {'actor_type': 'agent'}, {'private': True}):
+                self.assertEqual(self.webhook(self.event({**msg, **extra})).json['status'], 'ignored')
+            read.assert_not_called()
+        self.assertIsNone(self.db.one("SELECT id FROM conversations WHERE platform_id='new-customer'"))
+        self.assertEqual(self.webhook(self.event({**msg, 'assigned_agent_id': 'agent-self'})).json['status'], 'accepted')
+        self.assertNotIn('new-customer', self.db.one('SELECT payload FROM events')['payload'])
+        self.assertEqual(self.app.test_client().get('/api/events').status_code, 401)
+        self.call('/api/test-discovery', 'DELETE')
+        self.assertFalse(self.call('/api/test-discovery', 'GET').json['auto_discovery'])
+        self.assertEqual(self.webhook(self.event({**msg, 'id': 'paused'})).json['status'], 'ignored')
+        self.call('/api/settings', method='PUT', data={'reply_actor_id': 'agent-self'})
+        self.assertTrue(self.call('/api/test-discovery', 'GET').json['auto_discovery'])
+
+    def test_auto_discovery_resolves_assignment_before_history_and_customer_from_actor(self):
+        self.call('/api/settings', 'PUT', {'reply_actor_id': 'agent-self'})
+        msg = self.message('discovered', conversation_id='assigned-elsewhere', actor_id='actor-customer')
+        msg.pop('user_id')
+        result = self.webhook(self.event(msg))
+        c = self.svc.conv(result.json['conversation_id'])
+        self.assertEqual(c['user_id'], 'actor-customer')
+        with patch('lsp.providers.conversation', return_value={'assigned_agent_id': 'agent-other'}), \
+             patch('lsp.providers.history_pages') as history:
+            self.assertEqual(self.svc.drain()['failed'], 1)
+            history.assert_not_called()
+        self.assertFalse(self.svc.conv(c['id'])['sync_complete'])
+        self.assertNotIn(c['id'], [row['id'] for row in self.call('/api/conversations', 'GET').json['conversations']])
+        self.assertEqual(self.call('/api/conversations/%s/mode' % c['id'], 'PUT', {'mode': 'auto'}).status_code, 409)
+        event = {**msg, 'id': 'reassigned', 'assigned_agent_id': 'agent-self'}
+        self.assertEqual(self.webhook(self.event(event)).json['status'], 'accepted')
+        self.assertIn(c['id'], [row['id'] for row in self.call('/api/conversations', 'GET').json['conversations']])
+
     def test_pairing_filters_signature_roles_other_customers_and_consumed_code(self):
         start=self.call('/api/test-discovery',data={'channel':'WhatsApp','confirm_auto_reply':True}).json
         code=start['enrollment']['code']

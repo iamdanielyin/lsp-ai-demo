@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS conversations (
  source TEXT NOT NULL DEFAULT '', channel TEXT NOT NULL DEFAULT 'unknown', topic_id TEXT NOT NULL DEFAULT '',
  mode TEXT NOT NULL DEFAULT 'off', auto_since TEXT NOT NULL DEFAULT '', last_customer TEXT NOT NULL DEFAULT '',
  sync_complete INTEGER NOT NULL DEFAULT 0, sync_error TEXT, synced_at REAL, sync_cursor TEXT NOT NULL DEFAULT '',
- updated REAL NOT NULL, UNIQUE(tenant,platform_id));
+ assigned_agent_id TEXT NOT NULL DEFAULT '', updated REAL NOT NULL, UNIQUE(tenant,platform_id));
 CREATE TABLE IF NOT EXISTS messages (
  id INTEGER PRIMARY KEY, tenant TEXT NOT NULL, conversation INTEGER NOT NULL REFERENCES conversations(id),
  platform_id TEXT NOT NULL, actor TEXT NOT NULL, actor_id TEXT NOT NULL, created TEXT NOT NULL,
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS message_order ON messages(conversation,created,id);
 CREATE TABLE IF NOT EXISTS events (
  id INTEGER PRIMARY KEY, tenant TEXT NOT NULL, conversation INTEGER, platform_id TEXT, action TEXT NOT NULL,
- version TEXT, retries TEXT, created REAL NOT NULL, UNIQUE(tenant,conversation,platform_id,action));
+ version TEXT, retries TEXT, payload TEXT, created REAL NOT NULL, UNIQUE(tenant,conversation,platform_id,action));
 CREATE TABLE IF NOT EXISTS assets (
  id TEXT PRIMARY KEY, tenant TEXT NOT NULL, logical_id TEXT NOT NULL, version INTEGER NOT NULL,
  kind TEXT NOT NULL, name TEXT NOT NULL, purpose TEXT NOT NULL, tags TEXT NOT NULL, filename TEXT NOT NULL,
@@ -68,6 +68,10 @@ class Store:
             db.executescript(SCHEMA)
             if "sync_cursor" not in {r[1] for r in db.execute("PRAGMA table_info(conversations)")}:
                 db.execute("ALTER TABLE conversations ADD COLUMN sync_cursor TEXT NOT NULL DEFAULT ''")
+            if "payload" not in {r[1] for r in db.execute("PRAGMA table_info(events)")}:
+                db.execute("ALTER TABLE events ADD COLUMN payload TEXT")
+            if "assigned_agent_id" not in {r[1] for r in db.execute("PRAGMA table_info(conversations)")}:
+                db.execute("ALTER TABLE conversations ADD COLUMN assigned_agent_id TEXT NOT NULL DEFAULT ''")
         Path(path).chmod(0o600)
 
     @contextmanager

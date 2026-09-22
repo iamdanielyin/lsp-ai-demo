@@ -2,10 +2,10 @@
   "scope": "local_only_synthetic_providers_not_tenant_acceptance",
   "date": "2026-09-22",
   "unit_tests": {
-    "command": ".venv/bin/python -m unittest discover -s tests -v",
-    "passed": 76,
+    "command": ".venv/bin/python -m unittest discover -s tests -p 'test_*.py' -v",
+    "passed": 80,
     "failed": 0,
-    "duration_seconds": 12.660
+    "duration_seconds": 12.413
   },
   "syntax": [
     "python compileall passed",
@@ -80,17 +80,26 @@
       "random-code start via settings, synthetic signed webhook auto-identifies WhatsApp and WeChat separately",
       "both channels active; WhatsApp toggle pauses only WhatsApp while WeChat follow-up adds an accepted reply",
       "manual composer send changes WeChat to human mode; no runtime errors",
-      "pairing desktop 1440x1000 and mobile 390x844 screenshots inspected; no horizontal overflow"
+      "pairing desktop 1440x1000 and mobile 390x844 screenshots inspected; no horizontal overflow",
+      "2026-09-22: seat save resumes discovery without entering customer/conversation IDs",
+      "signed local webhook creates conversation and queues full history; new mode off",
+      "per-conversation restore includes two public customer messages in model context",
+      "second channel appears through polling without invalidating first channel AI",
+      "WhatsApp manual mode stops its AI while WeChat continues",
+      "raw encrypted webhook payload can be viewed by administrator",
+      "pause disables both conversations; saving same actor resumes collection",
+      "1440x1000 and 390x844 screenshots inspected; no runtime errors or horizontal overflow"
     ],
     "screenshots_directory": "local-screenshots",
     "network": "Local /api JSON responses inspected; no live vendor calls"
   },
   "real_tenant": {
-    "status": "blocked",
+    "status": "not_tested",
     "replies_sent": 0,
     "model_requests": 0,
     "customer_receipts": 0,
-    "reason": "Credentials, public webhook, channel accounts and media not supplied"
+    "reason": "Credentials and webhook configured locally by user; real channel event and delivery verification pending",
+    "scope": "this_verification_run_only"
   },
   "checks_after_restart": [
     "configuration remained empty and masked",
@@ -98,10 +107,11 @@
     "second process rejected by file lock",
     "empty model migrated to gpt-6-astra; auto remains off; settings HTTP 200",
     "OpenAI address update: normal server restarted; authenticated settings HTTP 200, default URL persisted, auto off, secrets masked",
-    "2026-09-21 pairing update: authenticated discovery HTTP 200, no bindings or enrollment; auto off, secret fields masked"
+    "2026-09-21 pairing update: authenticated discovery HTTP 200, no bindings or enrollment; auto off, secret fields masked",
+    "2026-09-22: normal 8127 server restarted; authenticated settings masked, auto-discovery active, events list valid, settings and conversations HTTP 200, cpolar URL retained, global AI off"
   ],
   "inbound_isolation": {
-    "scope": "synthetic_signed_events_only",
+    "scope": "legacy_explicit_allowlist_mode_synthetic_signed_events_only",
     "unselected_customer_events": 100,
     "extra_rows": 0,
     "background_jobs": 0,
@@ -117,7 +127,7 @@
     "ttl_seconds": 300,
     "passed_local": true,
     "real_tenant": "blocked",
-    "manual_acceptance_bypass": "explicit limited-account trial only; capability matrix unchanged"
+    "manual_acceptance_bypass": "legacy compatibility path only; recommended flow is seat auto-discovery and per-conversation AI"
   },
   "handoff_verification": {
     "date": "2026-09-22",
@@ -134,7 +144,16 @@
       "initial administrator login",
       "empty masked credentials and auto off"
     ],
-    "new_browser_run": false,
+    "new_browser_run": true,
     "prior_browser_evidence_retained": true
+  },
+  "auto_discovery": {
+    "scope": "local_synthetic_only",
+    "test_count": 4,
+    "default_ai": "off",
+    "assignment": "webhook then conversation detail before history",
+    "raw_payload": "encrypted at rest; administrator view",
+    "second_channel_keeps_first_mode": true,
+    "production_outbound_calls": 0
   }
 }

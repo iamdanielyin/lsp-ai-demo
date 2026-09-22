@@ -55,8 +55,24 @@ def normalize_message(message, cid):
         parts = [{"type": "unsupported", "text": "平台消息类型暂不支持预览"}]
     return {"platform_id": mid, "actor": actor, "actor_id": actor_id, "created": timestamp(message.get("created_time")),
             "private": int(private), "interaction": str(message.get("interaction_id", ""))[:200], "parts": parts,
-            "user_id": str(message.get("user_id", "")), "source": str(message.get("message_source", "")),
+            "user_id": str(message.get("user_id") or (actor_id if actor == "user" else "")), "source": str(message.get("message_source", "")),
             "topic_id": str(message.get("channel_id", ""))}
+
+
+def assigned_agent_id(payload, message):
+    """Read common assignment shapes without trusting a display name."""
+    objects = [message, payload.get("data", {}).get("conversation"), payload.get("conversation"), payload]
+    keys = ("assigned_agent_id", "assignedAgentId")
+    for obj in objects:
+        if not isinstance(obj, dict):
+            continue
+        for key in keys:
+            value = obj.get(key)
+            if isinstance(value, dict):
+                value = value.get("id")
+            if isinstance(value, str) and value:
+                return value[:200]
+    return ""
 
 
 class Service:
@@ -100,7 +116,7 @@ class Service:
         s, _ = self.settings.get()
         tenant = tenant_id(s)
         binding = self.discovery()["bindings"].get(s["source_mapping"].get(source))
-        auto = s["auto_reply_enabled"] and not (binding and binding["user_id"] == user_id and binding["paused"])
+        auto = s["auto_reply_enabled"] and not self.auto_scope_allowed(s) and not (binding and binding["user_id"] == user_id and binding["paused"])
         boundary = self.db.one("SELECT value FROM meta WHERE key='auto_since'")
         self.db.run("INSERT OR IGNORE INTO conversations(tenant,platform_id,user_id,source,channel,topic_id,mode,auto_since,updated) VALUES(?,?,?,?,?,?,?,?,?)",
                     (tenant, identifier(platform_id), user_id, source, s["source_mapping"].get(source, "unknown"), topic,
@@ -146,10 +162,8 @@ class Service:
             c = self.conv(cid)
             s, rev = self.settings.get()
             if mode == "auto":
-                if not s["auto_reply_enabled"]:
-                    self.send_guard(c, s)
-                    self.settings.auto_ready(s, rev, c["channel"])
                 self.send_guard(c, s)
+                require(c["sync_complete"] and not c["sync_error"], "history_not_ready", "请等待当前会话历史同步完成后恢复 AI", 409)
                 self.settings.auto_ready(s, rev, c["channel"])
             self.cancel_ai(cid, "人工接管或会话模式已变化，未发送任务已取消")
             state = self.discovery()
@@ -182,20 +196,34 @@ class Service:
             if captured:
                 return {"status": captured if isinstance(captured, str) else "discovered"}
             c = self.db.one("SELECT * FROM conversations WHERE tenant=? AND platform_id=?", (tenant_id(s), cid))
-            uid = message.get("user_id") or ""
+            uid = message.get("user_id") or (message.get("actor_id", "") if message.get("actor_type") == "user" else "")
             if uid:
                 identifier(uid)
             if c and c["user_id"] and uid:
                 require(c["user_id"] == uid, "identity_mismatch", "消息客户 ID 与会话不一致，已停止处理", 409)
             uid = uid or (c["user_id"] if c else "")
-            # Verify signatures before this method; ignore out-of-scope events without persisting content or work.
+            auto_capture = self.auto_discovery_allowed(s, message)
+            # An explicit assignment mismatch is safe to ignore. Payloads without assignment are accepted because
+            # Freshchat message_create variants do not all include the conversation assignee.
+            assigned = assigned_agent_id(payload, message)
+            if auto_capture and assigned and assigned != s["reply_actor_id"]:
+                if c:
+                    self.db.run("UPDATE conversations SET assigned_agent_id=? WHERE id=?", (assigned, c["id"]))
+                    self.set_mode(c["id"], "manual")
+                return {"status": "ignored", "reason": "outside_selected_agent"}
             source = c["source"] if c else ""
             if message.get("actor_type") == "user":
                 source = message.get("message_source") or source
-            if not test_identity_allowed(s, cid, uid) or not self.quick_scope(uid, source):
+            if auto_capture:
+                self.settings.observe_source(source)
+                s, rev = self.settings.get()
+            in_scope = test_identity_allowed(s, cid, uid) or auto_capture or (c and self.auto_scope_allowed(s))
+            if not in_scope or not self.quick_scope(uid, source):
                 return {"status": "ignored", "reason": "outside_test_scope"}
             m = normalize_message(message, cid)
             c = self.add_conversation(cid, uid, str(message.get("message_source", "")) if message.get("actor_type") == "user" else "")
+            if assigned:
+                self.db.run("UPDATE conversations SET assigned_agent_id=? WHERE id=?", (assigned, c["id"]))
             duplicate = self.db.one("SELECT id FROM events WHERE tenant=? AND conversation=? AND platform_id=? AND action=?", (c["tenant"], c["id"], m["platform_id"], action))
             if duplicate:
                 return {"status": "duplicate"}
@@ -218,9 +246,35 @@ class Service:
                         self.enqueue("generate", c, origin="ai", trigger=c["last_customer"], due=time.time() + s["debounce_ms"] / 1000)
                     except Problem as e:
                         self.db.log(c["tenant"], c["id"], "auto_blocked", e.message)
-            self.db.run("INSERT INTO events(tenant,conversation,platform_id,action,version,retries,created) VALUES(?,?,?,?,?,?,?)", (c["tenant"], c["id"], m["platform_id"], action, version[:80], retries[:20], time.time()))
+            self.db.run("INSERT INTO events(tenant,conversation,platform_id,action,version,retries,payload,created) VALUES(?,?,?,?,?,?,?,?)", (c["tenant"], c["id"], m["platform_id"], action, version[:80], retries[:20], self.db.seal(payload), time.time()))
             self.db.log(c["tenant"], c["id"], "event_received", f"{m['actor']} / {m['platform_id']}")
         return {"status": "accepted", "conversation_id": c["id"]}
+
+    def auto_discovery_allowed(self, s, message):
+        return bool(self.auto_scope_allowed(s)
+                    and message.get("actor_type") == "user"
+                    and message.get("message_type") == "normal"
+                    and not message.get("private") and not message.get("botsPrivateNote"))
+
+    def auto_scope_allowed(self, s):
+        return self.settings.auto_discovery_allowed(s)
+
+    def resume_auto_discovery(self):
+        with self.db.connect():
+            s, _ = self.settings.get()
+            require(s["reply_actor_id"], "agent_required", "请先选择发送坐席")
+            if s["test_identity_allowlist"] or s["auto_reply_enabled"]:
+                self.settings.save({"test_identity_allowlist": [], "auto_reply_enabled": False})
+            self.db.run("DELETE FROM meta WHERE key IN ('auto_discovery_paused','test_discovery')")
+
+    def pause_auto_discovery(self):
+        with self.db.connect():
+            self.settings.save({"test_identity_allowlist": [], "auto_reply_enabled": False})
+            self.db.run("DELETE FROM meta WHERE key='test_discovery'")
+            s, _ = self.settings.get()
+            for c in self.db.all("SELECT id FROM conversations WHERE tenant=?", (tenant_id(s),)):
+                self.cancel_ai(c["id"], "已暂停自动收集与 AI")
+            self.db.run("UPDATE conversations SET mode='off' WHERE tenant=?", (tenant_id(s),))
 
     def discovery(self):
         with self.db.lock:
@@ -439,7 +493,16 @@ class Service:
         c = self.conv(cid)
         s, revision = self.settings.get()
         try:
-            providers.conversation(s, c["platform_id"])
+            detail = providers.conversation(s, c["platform_id"])
+            with self.db.lock:
+                require(self.settings.get()[1] == revision, "config_changed", "配置变化，历史同步已中止", 409)
+                assigned = assigned_agent_id(detail, {})
+                if "assigned_agent_id" in detail or assigned:
+                    self.db.run("UPDATE conversations SET assigned_agent_id=? WHERE id=?", (assigned, cid))
+                    c = self.conv(cid)
+                if self.auto_scope_allowed(s) and assigned and assigned != s["reply_actor_id"]:
+                    self.set_mode(cid, "manual")
+                    raise Problem("outside_selected_agent", "会话已分配给其他坐席，已停止历史读取与 AI", 409)
             # The cursor must come from the last successful API sync, never a newer webhook message.
             start = c["sync_cursor"] if c["sync_complete"] and c["sync_cursor"] and not full else None
             cursor = c["sync_cursor"]
@@ -474,9 +537,12 @@ class Service:
     def send_guard(self, c, s):
         require(c["tenant"] == tenant_id(s), "tenant_changed", "当前租户已变化", 409)
         require(s["reply_actor_id"] and s["freshchat_token"] and s["platform_api_base_url"], "send_not_configured", "平台发送配置不完整", 409)
+        require(not self.auto_scope_allowed(s) or not c.get("assigned_agent_id") or c["assigned_agent_id"] == s["reply_actor_id"],
+                "outside_selected_agent", "会话已分配给其他坐席", 409)
         require(self.quick_scope(c["user_id"], c["source"]), "identity_denied", "该账号未绑定当前测试渠道", 403)
         require(c["channel"] != "unknown" and c["channel"] in s["allowed_channels"], "channel_denied", "当前来源未映射或渠道未列入白名单", 409)
-        require(test_identity_allowed(s, c["platform_id"], c["user_id"]), "identity_denied", "当前客户或会话未列入测试白名单", 403)
+        require(test_identity_allowed(s, c["platform_id"], c["user_id"]) or self.auto_scope_allowed(s),
+                "identity_denied", "当前客户或会话未列入测试白名单", 403)
 
     def asset(self, aid):
         require(isinstance(aid, str) and 0 < len(aid) <= 260, "invalid_asset_id", "素材 ID 格式不正确")
@@ -653,7 +719,8 @@ class Service:
                     require(job["tenant"] == tenant_id(s) and revision == job["revision"], "stale_plan", "配置已变化，任务取消", 409)
                     if job["origin"] == "webhook":
                         c = self.conv(job["conversation"])
-                        require(test_identity_allowed(s, c["platform_id"], c["user_id"]), "stale_plan", "已移出测试范围，后台同步取消", 409)
+                        require(test_identity_allowed(s, c["platform_id"], c["user_id"]) or self.auto_scope_allowed(s),
+                                "stale_plan", "已移出测试范围，后台同步取消", 409)
                     if job["kind"] not in ("send", "ticket"):
                         self.db.run("UPDATE jobs SET state='generating',attempts=attempts+1,updated=? WHERE id=? AND state='queued'", (time.time(), job["id"]))
                     if job["kind"] == "sync":

@@ -3,6 +3,9 @@ test_agent_origin_does_not_overwrite_customer_channel (test_demo.DemoTests.test_
 test_ai_generation_and_send_with_usage_evidence (test_demo.DemoTests.test_ai_generation_and_send_with_usage_evidence) ... ok
 test_asset_scan_state_and_immutable_versions (test_demo.DemoTests.test_asset_scan_state_and_immutable_versions) ... ok
 test_auth_csrf_origin_and_no_public_file_access (test_demo.DemoTests.test_auth_csrf_origin_and_no_public_file_access) ... ok
+test_auto_discovery_assignment_roles_and_pause (test_demo.DemoTests.test_auto_discovery_assignment_roles_and_pause) ... ok
+test_auto_discovery_resolves_assignment_before_history_and_customer_from_actor (test_demo.DemoTests.test_auto_discovery_resolves_assignment_before_history_and_customer_from_actor) ... ok
+test_auto_discovery_second_channel_does_not_reset_first_conversation (test_demo.DemoTests.test_auto_discovery_second_channel_does_not_reset_first_conversation) ... ok
 test_background_scope_rechecked_and_manual_import_still_works (test_demo.DemoTests.test_background_scope_rechecked_and_manual_import_still_works) ... ok
 test_cleanup_preserves_activity_and_unverified (test_demo.DemoTests.test_cleanup_preserves_activity_and_unverified) ... ok
 test_config_change_disables_and_invalidates_and_hides_old_tenant (test_demo.DemoTests.test_config_change_disables_and_invalidates_and_hides_old_tenant) ... ok
@@ -59,6 +62,7 @@ test_rsa_public_key_formats_save_and_verify_webhooks (test_demo.DemoTests.test_r
 test_safe_429_has_delayed_bounded_retry (test_demo.DemoTests.test_safe_429_has_delayed_bounded_retry) ... ok
 test_scheduler_auth_bodies_dry_run_execution_no_sensitive_data (test_demo.DemoTests.test_scheduler_auth_bodies_dry_run_execution_no_sensitive_data) ... ok
 test_scheduler_lock_and_unknown_skip (test_demo.DemoTests.test_scheduler_lock_and_unknown_skip) ... ok
+test_selected_agent_auto_collects_new_conversation_and_exposes_event_payload (test_demo.DemoTests.test_selected_agent_auto_collects_new_conversation_and_exposes_event_payload) ... ok
 test_selected_customer_reopen_and_agent_without_user_id (test_demo.DemoTests.test_selected_customer_reopen_and_agent_without_user_id) ... ok
 test_settings_encryption_masking_clear_restart (test_demo.DemoTests.test_settings_encryption_masking_clear_restart) ... ok
 test_settings_origin_through_tunnel_and_local_entry (test_demo.DemoTests.test_settings_origin_through_tunnel_and_local_entry) ... ok
@@ -76,6 +80,6 @@ test_webhook_atomic_persist_failure (test_demo.DemoTests.test_webhook_atomic_per
 test_wrong_channel_cannot_send_and_not_support_false_switch (test_demo.DemoTests.test_wrong_channel_cannot_send_and_not_support_false_switch) ... ok
 
 ----------------------------------------------------------------------
-Ran 76 tests in 12.660s
+Ran 80 tests in 12.413s
 
 OK

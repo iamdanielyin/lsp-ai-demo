@@ -35,7 +35,7 @@
 | [static/app.css](../static/app.css)、[favicon.svg](../static/favicon.svg) | 样式、响应式和图标 |
 | [tests/test_demo.py](../tests/test_demo.py) | 核心自动化测试及回归 |
 | [tests/browser_app.py](../tests/browser_app.py) | 历史/媒体/工单的本地合成UI实例 |
-| [tests/pairing_browser_app.py](../tests/pairing_browser_app.py) | 双渠道测试码/真实本地验签/人工切换的合成UI实例 |
+| [tests/pairing_browser_app.py](../tests/pairing_browser_app.py) | 双渠道自动发现/真实本地验签/人工切换的合成UI实例 |
 
 文档只解释代码，不复制整份源码；点击上表即可阅读实现。
 
@@ -56,9 +56,9 @@ flowchart LR
     Q -->|需要且已配置时| F[Freshdesk跟进Ticket]
 ```
 
-Webhook验签和事务完成后返回，不等待模型或平台外发。范围外事件不进入消息、会话、历史同步或AI任务表；短时监听期间只缓存脱敏候选元数据，点选后才建立会话并同步历史。签名失败/解析失败/持久化失败不返回伪成功。
+Webhook验签和事务完成后返回，不等待模型或平台外发。选定坐席后，公开客户消息会自动建立本地会话并排队历史同步；事件原始载荷加密保存供管理员在“Webhook 最近事件”查看。会话 AI 默认关闭，签名失败/解析失败/持久化失败不返回伪成功。
 
-快速绑定沿用原始事件的客户ID/会话ID/来源，白名单保存实际客户ID，额外核对来源配对。配置版本改变会取消旧任务并重新检查已绑定账号。首次绑定使普通试运行可在尚未完成手动文本验收时启用，但能力矩阵保留未验证事实。
+会话 ID、客户 ID 和来源直接来自签名 Webhook；不存在按坐席列出历史会话的公共 API，因此消息页通过实时事件累积本地会话列表。人工点击会话内的 AI 开关，不需要另行填写身份 ID。
 
 ## SQLite 与身份隔离
 
@@ -103,11 +103,10 @@ tenant指纹由平台地址和Token计算；轮换平台凭证也要求重新导
 | `GET /api/agents` | 当前租户可用坐席列表 |
 | `GET /api/status` | 路线/自动开关/本地任务统计，tenant_verified始终如实显示 |
 | `POST /api/checks` | kind=openai/platform_read/send/verify_outbound/record；发送必须明确确认；通过不能伪造 |
-| `GET /api/capabilities`、`GET /api/events` | 矩阵与当前版本检查、最近50个已接纳事件 |
-| `GET /api/test-discovery` | 当前监听窗口、脱敏候选、绑定列表和独立开关状态；仅限登录管理员 |
-| `POST /api/test-discovery/bind-next` | `{"channel":"WhatsApp"}`；开启5分钟短时监听，不自动回复 |
-| `POST /api/test-discovery/select` | `{"conversation_id":"<PLATFORM_CONVERSATION_ID>"}`；点选候选后读取历史并加入白名单 |
-| `POST /api/test-discovery` | 兼容旧测试码流程；`{"channel":"WhatsApp","confirm_auto_reply":true}` |
+| `GET /api/capabilities`、`GET /api/events` | 矩阵、当前版本检查及最近50个事件；事件行可查看加密保存的原始 JSON |
+| `GET /api/test-discovery` | 当前坐席自动收集状态及兼容旧绑定；仅限登录管理员 |
+| `POST /api/test-discovery/bind-next`、`POST /api/test-discovery/select` | 兼容旧候选监听流程；推荐路径不需要调用 |
+| `POST /api/test-discovery` | 兼容旧测试码流程；推荐路径不需要调用 |
 | `PUT /api/test-discovery/mode` | `{"channel":"WeChat","enabled":false}`，该渠道账号人工接管；true明确恢复 |
 | `DELETE /api/test-discovery` | 空JSON对象，结束全部测试；不是删除平台会话 |
 | `POST /api/conversations/import` | conversation_id或user_id；手动读取真实会话，保留旧导入方式 |

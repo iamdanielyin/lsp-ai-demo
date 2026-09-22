@@ -147,7 +147,14 @@ def create_app(config=None, start_worker=True):
 
     @app.route("/api/settings", methods=["GET", "PUT"])
     def settings():
-        return jsonify(service.settings.public() if request.method == "GET" else service.settings.save(body()))
+        if request.method == "GET":
+            return jsonify(service.settings.public())
+        patch = body()
+        with db.connect():
+            service.settings.save(patch)
+            if patch.get("reply_actor_id") and not patch.get("test_identity_allowlist"):
+                service.resume_auto_discovery()
+            return jsonify(service.settings.public())
 
     @app.get("/api/agents")
     def agents():
@@ -235,7 +242,10 @@ def create_app(config=None, start_worker=True):
     @app.get("/api/events")
     def events():
         s, _ = service.settings.get()
-        return jsonify(events=db.all("SELECT id,conversation,platform_id,action,version,retries,created FROM events WHERE tenant=? ORDER BY id DESC LIMIT 50", (tenant_id(s),)))
+        rows = db.all("SELECT id,conversation,platform_id,action,version,retries,payload,created FROM events WHERE tenant=? ORDER BY id DESC LIMIT 50", (tenant_id(s),))
+        for row in rows:
+            row["payload"] = db.unseal(row["payload"]) if row["payload"] else None
+        return jsonify(events=rows)
 
     @app.post("/api/conversations/import")
     def import_conversation():
@@ -261,14 +271,12 @@ def create_app(config=None, start_worker=True):
         else:
             if request.method == "DELETE":
                 require(not body(), "invalid_body", "此接口只接受空 JSON 对象")
-                with db.connect():
-                    service.settings.save({"test_identity_allowlist": [], "auto_reply_enabled": False})
-                    db.run("DELETE FROM meta WHERE key='test_discovery'")
+                service.pause_auto_discovery()
             state = service.discovery()
-        result = {"enrollment": state["enrollment"], "next_binding": state.get("next_binding"),
+        s, _ = service.settings.get()
+        result = {"auto_discovery": service.auto_scope_allowed(s), "enrollment": state["enrollment"], "next_binding": state.get("next_binding"),
                   "candidates": [{k: c[k] for k in ("channel", "conversation_id", "user_id", "source", "observed_at")}
                                  for c in state.get("candidates", [])], "bindings": []}
-        s, _ = service.settings.get()
         for b in state["bindings"].values():
             c = service.conv(b["local_id"])
             result["bindings"].append({k: v for k, v in b.items() if k not in ("code_hash", "trigger_id")})
@@ -298,6 +306,8 @@ def create_app(config=None, start_worker=True):
     def conversations():
         s, _ = service.settings.get()
         rows = db.all("SELECT * FROM conversations WHERE tenant=? ORDER BY updated DESC", (tenant_id(s),))
+        if service.auto_scope_allowed(s):
+            rows = [r for r in rows if not r["assigned_agent_id"] or r["assigned_agent_id"] == s["reply_actor_id"]]
         query = request.args.get("q", "").casefold()
         channel = request.args.get("channel", "")
         rows = [r for r in rows if (not query or query in (r["platform_id"] + " " + r["user_id"]).casefold()) and (not channel or channel == r["channel"])]

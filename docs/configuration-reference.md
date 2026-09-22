@@ -4,11 +4,11 @@
 
 ## 填写规则
 
-- 所有业务配置在 `/settings`。常用项在“连接平台和AI”“测试账号与人工接管”“接收新消息”“知识与素材”“跟进工单”“开启自动回复”；剩余项在同页“高级设置”。
+- 所有业务配置在 `/settings`。常用项在“连接平台和AI”“坐席与单会话 AI”“接收新消息”“知识与素材”“跟进工单”；剩余项在同页“高级设置”。
 - 列表控件输入英文/中文逗号分隔内容；JSON控件必须使用标准JSON双引号；数值按表中单位填写。
 - 密钥保存后只回显“已设置”及掩码；留空保持原值，勾选“明确清除已保存凭证”才删除。设置 API 的 `clear_secrets` 是显式清除列表，不是普通持久配置。
 - 修改影响行为的配置会增加版本、关闭自动回复、取消旧任务并使旧能力检查/测试绑定失效。`auto_reply_enabled`、`scheduler_token`、`local_retention_days`、`seed_conversation_id`、`seed_user_id` 不增加版本，但关闭自动回复仍取消待发 AI。
-- “保存”不向客户发送；“保存并检查OpenAI”有真实模型用量；“监听下一批会话”只产生5分钟脱敏候选，点选后 AI 仍需在单个会话明确恢复。
+- “保存”不向客户发送；“保存并检查OpenAI”有真实模型用量；保存坐席后自动收集公开新消息；AI 仍需在单个会话明确恢复。
 
 ## 平台连接及身份
 
@@ -18,10 +18,10 @@
 | `platform_api_base_url` | 空；平台调用必填 | 管理员从实际租户API资料确认区域主机。HTTPS443，**不带 `/v2`**；代码只允许指定Freshchat官方域名后缀，不猜工作台域名 |
 | `freshchat_token` | 空；平台调用必填，敏感 | Freshchat `Admin → CONFIGURE → API Tokens → Generate Token`；菜单可能随租户变化。需能读历史、回复并按需上传素材。由后端加Bearer |
 | `reply_actor_id` | 空；发送/启动测试必填 | 点击“读取坐席”，从真实 `/v2/agents` 结果选择；推荐专用测试Agent。读列表无权限时由管理员提供ID。不能填昵称/邮箱替代 |
-| `source_mapping` | `{}`；自动发送前需有真实来源 | JSON：`{"<OBSERVED_SOURCE>":"WhatsApp"}`。测试码自动把观察到的 `message_source` 与所选渠道关联。`channel_id` 是Topic等平台字段，不据此推断渠道 |
-| `allowed_channels` | `[]` | 测试码按已绑定渠道自动维护。手填如 `WhatsApp, WeChat`，必须已经存在来源映射；不能包含unknown |
-| `test_identity_allowlist` | `[]` | 测试码自动写入平台ID。手工格式 `user:<PLATFORM_USER_ID>` 或 `conversation:<PLATFORM_CONVERSATION_ID>`。昵称/号码不授权。双渠道还按用户和来源组合检查；空白时仅有效识别码可启动绑定 |
-| `seed_conversation_id` | 空，可选 | 手动导入的初始真实Freshchat会话ID；测试码流程无需填写。不是Freshdesk Ticket编号或Demo本地整数ID |
+| `source_mapping` | `{}`；来源识别后自动补充 | JSON：`{"<OBSERVED_SOURCE>":"WhatsApp"}`。自动发现会按 `message_source` 补充已知渠道；`channel_id` 是 Topic 等平台字段，不据此推断渠道 |
+| `allowed_channels` | `[]`；自动发现收到已知来源后自动补充 | 手填如 `WhatsApp, WeChat` 时必须已经存在来源映射；不能包含unknown |
+| `test_identity_allowlist` | `[]`；自动发现模式请保持为空 | 兼容旧流程的格式为 `user:<PLATFORM_USER_ID>` 或 `conversation:<PLATFORM_CONVERSATION_ID>`；昵称/号码不授权。填写后会收窄为指定身份 |
+| `seed_conversation_id` | 空，可选 | 手动导入的初始真实Freshchat会话ID；自动发现流程无需填写。不是Freshdesk Ticket编号或Demo本地整数ID |
 | `seed_user_id` | 空，可选 | 手动导入同用户其他会话时用真实Freshchat user ID；不是requester ID、昵称、手机号或微信号 |
 
 Freshchat/Freshdesk官方域名后缀的当前允许列表见 `lsp/security.py`，主机需实际租户支持。非典型官方主机应先核实再改代码，不能为绕过校验填一个错误域名。
@@ -36,7 +36,7 @@ Freshchat/Freshdesk官方域名后缀的当前允许列表见 `lsp/security.py`�
 
 验签公钥支持 `BEGIN PUBLIC KEY`、`BEGIN RSA PUBLIC KEY` 的 PEM，以及可换行的 Base64 DER；可原样粘贴平台公钥，无需手工改标头。程序按实际编码解析，只接受至少2048位的 RSA 公钥，拒绝私钥、损坏数据及其他密钥类型。
 
-Freshchat请求应包含 `X-Freshchat-Signature`；程序记录 `X-Freshchat-Payload-Version` 和 `X-Retry-Count`，重试次数不代替消息去重。当前无需、也不显示 `freshdesk_webhook_secret`，因为没有实现Ticket事件路线。首次设置公钥前的回调会503；配置后再发送测试码。
+Freshchat请求应包含 `X-Freshchat-Signature`；程序记录 `X-Freshchat-Payload-Version` 和 `X-Retry-Count`，重试次数不代替消息去重。当前无需、也不显示 `freshdesk_webhook_secret`，因为没有实现Ticket事件路线。首次设置公钥前的回调会503；配置后再发送普通客户消息。
 
 ## OpenAI 与客服内容
 
@@ -60,14 +60,14 @@ Freshchat请求应包含 `X-Freshchat-Signature`；程序记录 `X-Freshchat-Pay
 
 | 参数 | 默认 / 范围 | 填写说明 |
 | --- | --- | --- |
-| `auto_reply_enabled` | `false` | 全局总开关。快速测试码流程在历史/模型检查后启用；普通手工绑定需要当前渠道入站、历史、手动文本及OpenAI检查。各测试渠道独立开关控制账号人工暂停，不需要反复编辑此值 |
+| `auto_reply_enabled` | `false` | 兼容旧流程的全局开关。自动发现模式保持false，由会话页的“恢复 AI / 人工接管”独立控制，保存坐席会退出旧全局流程 |
 | `debounce_ms` | `1500`；0–10000毫秒 | 短时间追加消息合并；新消息取消未发旧计划 |
 | `max_reply_messages` | `3`；1–10条 | 单个模型计划和手工提交的服务器条数上限；独立任务逐条发送 |
 | `ai_requests_per_minute` | `10`；1–120次 | Demo本地限额，非供应商额度；检查、预览和自动生成均占用预算 |
 | `daily_token_budget` | `100000`；1000–10000000 | 按UTC日计量。未知用量保留预算预占，超限停止生成；不是计费硬限额承诺 |
 | `max_safe_retries` | `2`；0–5次 | 仅明确安全错误（如429，以及历史读取网络失败）限次退避；外发unknown不能自动重试 |
 
-人工恢复方式固定为手动，没有定时恢复参数。新配置、新启用/恢复时记录消息边界；绑定测试码触发的一条问候是明确授权的启动反馈，不是旧历史逐条补发。
+人工恢复方式固定为手动，没有定时恢复参数。新配置、新启用/恢复时记录消息边界；当前流程不自动发送启用问候，也不补发旧历史。
 
 ## Freshdesk 跟进工单
 
@@ -115,20 +115,19 @@ Freshchat请求应包含 `X-Freshchat-Signature`；程序记录 `X-Freshchat-Pay
 
 只有当前版本可发送、启用且允许该渠道的素材才可进模型目录。图片/视频/PDF各准备一个获准测试文件；不要把真实隐私附件提交代码仓库。
 
-## 测试码与开关的派生参数
+## 自动发现与开关的派生参数
 
-这些是运行状态，不是要求用户填写的额外设置项。代码在加密 `meta.test_discovery` 中保存。短时监听只保存脱敏候选，点选前不保存消息正文。
+这些是运行状态，不是要求用户填写的额外设置项。事件原始 JSON 加密保存在 `events.payload`，本地会话通过 Webhook 自动累积。
 
 | 字段 / 动作 | 说明 |
 | --- | --- |
-| `channel` | 开始识别时选择WhatsApp或WeChat；也保留Webchat选项，但不能替代WeChat验收 |
-| `next_binding` | 点击“监听下一批会话”选择渠道，5分钟内接收候选；不会自动回复 |
-| `candidate` | 候选只含会话 ID、客户 ID、来源和时间；管理员点选后才同步历史并加入白名单 |
-| `confirm_auto_reply` | 兼容旧测试码入口；不作为推荐流程 |
-| `code` / `expires` | 兼容旧测试码入口；推荐使用 `next_binding` |
-| 客户/会话/来源ID | 来自有效签名事件，页面自动显示；每渠道只保留一个绑定 |
-| `enabled` | 各渠道AI开关；关闭暂停该账号的未发AI，恢复后不补发历史 |
+| `channel` | 从签名事件的 `message_source` 自动映射为 WhatsApp、WeChat 或 Webchat；未知来源需人工核实 |
+| `auto_discovery` | 保存发送坐席后自动接收公开新消息并排队历史同步；不会自动回复 |
+| `event_payload` | “Webhook 最近事件”查看管理员可见的原始 JSON；无需配置客户/会话 ID |
+| `confirm_auto_reply`、`code` / `expires` | 兼容旧测试码入口；不作为推荐流程 |
+| 客户/会话/来源 ID | 来自有效签名事件，页面自动显示；无需设置页填写 |
+| `enabled` | 旧接口的渠道开关；新流程在会话页使用 `mode` 控制当前会话的未发AI，恢复后不补发历史 |
 | `paused` / `status` | 人工暂停与启动状态；后台检查失败显示原因，重启不自动解除人工暂停 |
-| “结束所有测试” | 清空全部测试身份和测试码，关闭自动回复；不删除平台消息，不撤回已提交请求 |
+| “暂停自动收集” | 暂停新事件入库并关闭自动回复；不删除平台消息，不撤回已提交请求 |
 
 完整操作和三层接收核对见 [测试手册](testing-guide.md)。

@@ -81,6 +81,9 @@ class Settings:
             self.validate(s)
             if tenant_id(s) != tenant_id(old) and "test_identity_allowlist" not in patch:
                 s["test_identity_allowlist"] = []
+                self.db.run("INSERT OR REPLACE INTO meta VALUES('auto_discovery_paused',?)", (self.db.seal(True),))
+            elif "test_identity_allowlist" in patch and not s["test_identity_allowlist"]:
+                self.db.run("INSERT OR REPLACE INTO meta VALUES('auto_discovery_paused',?)", (self.db.seal(True),))
             changed = {k for k in s if s[k] != old[k]}
             if not changed:
                 return self.public()
@@ -162,9 +165,28 @@ class Settings:
         row = self.db.one("SELECT status FROM checks WHERE tenant=? AND revision=? AND channel=? AND capability=? ORDER BY id DESC LIMIT 1", (tenant_id(s), revision, channel, capability))
         return bool(row and row["status"] == "passed")
 
+    def auto_discovery_allowed(self, s):
+        return bool(s["reply_actor_id"] and not s["test_identity_allowlist"]
+                    and not self.db.one("SELECT value FROM meta WHERE key='auto_discovery_paused'"))
+
+    def observe_source(self, source):
+        # Observed channel metadata must not invalidate another conversation's AI or connection checks.
+        channel = {"whatsapp": "WhatsApp", "wechat": "WeChat", "webchat": "Webchat", "web": "Webchat"}.get(str(source).casefold())
+        with self.db.connect():
+            s, revision = self.get()
+            channel = s["source_mapping"].get(source, channel)
+            if not channel or source in s["source_mapping"] and channel in s["allowed_channels"]:
+                return
+            s["source_mapping"][source] = channel
+            s["allowed_channels"] = list(dict.fromkeys([*s["allowed_channels"], channel]))
+            self.db.run("UPDATE meta SET value=? WHERE key='settings'", (self.db.seal({"revision": revision, "values": s}),))
+            self.db.run("UPDATE conversations SET channel=? WHERE tenant=? AND source=?", (channel, tenant_id(s), source))
+
     def auto_ready(self, s, revision, channel=None):
         require(all(s[k] for k in ("platform_api_base_url", "freshchat_token", "reply_actor_id", "freshchat_public_key", "openai_api_key", "openai_model", "public_base_url")), "auto_not_ready", "自动回复所需平台、Webhook 或 OpenAI 配置不完整")
-        require(s["allowed_channels"] and s["test_identity_allowlist"], "auto_not_ready", "请先设置允许渠道和测试客户白名单")
+        require(s["allowed_channels"], "auto_not_ready", "请先设置允许渠道")
+        require(s["test_identity_allowlist"] or (channel and self.quick_test_authorized(s, revision, channel)),
+                "auto_not_ready", "请先选择测试会话，或设置测试客户白名单")
         require(self.passed("*", "openai", s, revision), "auto_not_ready", "当前配置尚未通过真实 OpenAI 检查")
         for ch in [channel] if channel else s["allowed_channels"]:
             for capability in ("inbound", "history", "manual_text"):
@@ -177,6 +199,8 @@ class Settings:
         state = self.db.unseal(row["value"]) if row else {}
         bindings = state.get("bindings", {})
         binding = bindings.get(channel)
+        if not binding and self.auto_discovery_allowed(s):
+            return channel in s["allowed_channels"]
         return (binding and binding.get("status") in ("active", "starting") and state.get("tenant") == tenant_id(s)
                 and state.get("revision") == revision and channel in s["allowed_channels"]
                 and "user:" + binding.get("user_id", "") in s["test_identity_allowlist"])

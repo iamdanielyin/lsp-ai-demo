@@ -65,7 +65,7 @@ const groups = [
     ['freshchat_token','Freshchat API Token','secret'],['reply_actor_id','发送坐席','agent','','点击读取坐席，再选择用于测试的 Agent。'],
     ['source_mapping','真实来源 → 渠道映射','json','{"web":"Webchat","whatsapp":"WhatsApp"}','按实际 message_source 建立映射；channel_id 仅作为 Topic 保存。'],
     ['allowed_channels','允许外发的渠道','list','WhatsApp, Webchat','先配置来源映射，再填写渠道名；初始为空。'],
-    ['test_identity_allowlist','测试客户 / 会话白名单','list','user:<ID>, conversation:<ID>','同时限制 Webhook 入站和外发；为空时忽略全部新事件。',true],
+    ['test_identity_allowlist','测试客户 / 会话白名单（兼容限制，可留空）','list','user:<ID>, conversation:<ID>','自动发现模式请留空；填写后仅接收指定客户或会话，用于兼容旧的限定测试流程。',true],
     ['seed_conversation_id','首次会话 ID','text'],['seed_user_id','首次客户 ID','text']]],
   ['webhook','Webhook 入站','平台订阅、RSA 验签与回调地址',[
     ['public_base_url','服务公网 HTTPS 地址','text','https://<DEMO_HOST>','公网部署或隧道由部署者提供。'],['webhook_path','回调路径','readonly'],
@@ -107,11 +107,11 @@ function field(f) {
 }
 const quickSections = [
   ['connect','连接平台和 AI','填写平台地址与两项密钥；OpenAI 地址可按需修改',['platform_api_base_url','freshchat_token','openai_api_key','openai_base_url']],
-  ['test','测试账号与人工接管','发送一次性测试码，自动识别账号并启动 AI',['reply_actor_id']],
+  ['test','坐席与单会话 AI','保存发送坐席后自动接收新会话；AI 仍需在单会话中明确恢复',['reply_actor_id']],
   ['webhook','接收新消息','测试 Webhook 和自动回复时再填写',['public_base_url','freshchat_public_key']],
   ['knowledge','知识与素材','测试停车问答、图片、视频或 PDF 时再添加',['knowledge_text']],
   ['freshdesk','跟进工单','需要创建 Ticket 时再填写',['freshdesk_domain','freshdesk_api_key','requester_mapping']],
-  ['policy','开启自动回复','完成入站、历史、手动文本和 OpenAI 检查后开启',['auto_reply_enabled']]
+
 ];
 const settingFields = groups.flatMap(g=>g[3]);
 function settingsDirty() {S.dirty=true;$('#save-note').textContent='有未保存修改。检查或读取前会先保存；保存不会发送消息。';}
@@ -125,6 +125,7 @@ async function saveSettings() {
     else if(type==='select'&&['priority','status'].includes(key))value=Number(value);
     if(JSON.stringify(value)!==JSON.stringify(S.settings.values[key]))patch[key]=value;
   });
+  if($('#s-reply_actor_id').value&&!Object.hasOwn(patch,'test_identity_allowlist'))patch.reply_actor_id=$('#s-reply_actor_id').value;
   const tenantChanged=Object.hasOwn(patch,'platform_api_base_url')||!!patch.freshchat_token||patch.clear_secrets.includes('freshchat_token');
   S.settings=await api('/api/settings',{method:'PUT',body:patch});S.dirty=false;
   $$('[data-type="secret"]').forEach(el=>{el.value='';el.placeholder=S.settings.secrets[el.dataset.key]?'•••••••• 已设置，留空保持':'尚未设置';});
@@ -133,8 +134,10 @@ async function saveSettings() {
   $('#s-openai_base_url').value=S.settings.values.openai_base_url;
   $('#model-default').textContent='当前模型 '+S.settings.values.openai_model+' · 可在高级设置修改';
   $('#s-auto_reply_enabled').checked=S.settings.values.auto_reply_enabled;
+  $$('[data-type="json"],[data-type="list"]').forEach(el=>{const value=S.settings.values[el.dataset.key];el.value=el.dataset.type==='json'?JSON.stringify(value,null,2):value.join(', ');});
   $('#save-note').textContent='设置已保存。密钥留空保持；保存不会发送消息。';
   if(tenantChanged||['test_identity_allowlist','source_mapping','allowed_channels'].some(key=>Object.hasOwn(patch,key)))await refreshTestTargets();
+  await refreshDiscovery();
 }
 async function settingsPage() {
   S.settings=await api('/api/settings');
@@ -165,28 +168,18 @@ async function refreshDiscovery() {
   const root=$('#test-discovery');if(!root)return;
   const d=await api('/api/test-discovery');if(!root.isConnected)return;
   const fingerprint=JSON.stringify(d);if(root.dataset.state===fingerprint)return;
-  const previous=root.dataset.state?JSON.parse(root.dataset.state):null;
-  if(previous&&!S.dirty){await settingsPage();return;}
   root.dataset.state=fingerprint;
-  const p=d.enrollment,n=d.next_binding,candidates=d.candidates||[];
-  const bindings=d.bindings.map(b=>`<div class="advanced-group"><h3>${esc(b.channel)} · ${b.status==='starting'?'正在读取历史并检查配置':b.status==='failed'?'启动失败':b.enabled?'AI 自动回复中':b.paused?'人工接管中':'自动回复已暂停'}</h3><p class="mono-block">客户 ID：${esc(b.user_id)}<br>会话 ID：${esc(b.conversation_id)}<br>平台来源：${esc(b.source)}</p>${b.error?`<p class="error-text">${esc(b.error)}</p>`:''}<div class="actions">${b.status==='starting'?`<span class="muted">历史同步与连接检查进行中…</span>`:`<label class="check-label"><input class="quick-ai-toggle" data-channel="${esc(b.channel)}" type="checkbox" role="switch" ${b.enabled?'checked':''} ${b.status==='failed'?'disabled':''}>${esc(b.channel)} AI 自动回复</label>`}<a href="/conversations?conversation=${b.local_id}">打开会话，手动回复 →</a></div></div>`).join('');
-  const candidateHTML=candidates.length?'<div class="advanced-group"><h3>发现 '+candidates.length+' 个候选会话</h3><p class="readonly-note">只显示平台 ID、客户 ID 和来源。未点选的消息正文不会保存，也不会调用 AI。</p>'+candidates.map(c=>'<div class="candidate-row"><div><strong>'+esc(c.channel)+' · '+esc(c.source)+'</strong><small class="mono">会话 '+esc(c.conversation_id)+' · 客户 '+esc(c.user_id)+'</small><small>'+fmtTime(c.observed_at)+'</small></div><button type="button" class="small select-candidate" data-conversation="'+esc(c.conversation_id)+'">选择此会话</button></div>').join('')+'</div>':'';
-  root.innerHTML=bindings+candidateHTML+`${n?`<div class="notice"><strong>监听中：${esc(n.channel)}</strong><br><span class="muted">有效至 ${fmtTime(n.expires)}。测试账号发送任意一条普通消息后，这里会出现候选；不会自动回复。</span></div>`:''}${p?`<details class="advanced-group"><summary>${p.status==='waiting'?'兼容入口：等待一次性测试码':'兼容入口：识别失败'}</summary>${p.error?`<p class="error-text">${esc(p.error)}</p>`:`<p>旧流程测试码有效至 ${fmtTime(p.expires)}。</p><label for="test-code">一次性测试码<input id="test-code" readonly value="${esc(p.code)}"></label><button id="copy-test-code" type="button" class="small">复制测试码</button>`}</details>`:''}<div class="field test-targets"><label for="discovery-channel">监听渠道</label><select id="discovery-channel"><option>WhatsApp</option><option>WeChat</option><option>Webchat</option></select></div><p class="readonly-note">先配置并启用 Freshchat Webhook。监听窗口 5 分钟；收到候选后由你点选，Demo 才会读取完整历史并加入该客户白名单。每个渠道可单独绑定一个测试账号。</p><div class="actions"><button type="button" id="bind-next" class="primary">${n?'重新开始监听':'监听下一批会话'}</button>${p||n||d.bindings.length?'<button type="button" id="stop-discovery" class="small">结束监听 / 测试</button>':''}</div><p class="readonly-note">AI 默认关闭。打开会话后，在右侧单独点击“恢复 AI”；人工发送或“人工接管”会取消未发送任务，已提交请求无法撤回。</p>`;
-  $('#discovery-channel').value=n?.channel||p?.channel||(['WhatsApp','WeChat'].find(ch=>!d.bindings.some(b=>b.channel===ch))||'WhatsApp');
-  buttonAction($('#bind-next'),async()=>{const channel=$('#discovery-channel').value;await saveSettings();await api('/api/test-discovery/bind-next',{method:'POST',body:{channel}});await settingsPage();toast('监听已开启，请用测试账号发送任意普通消息');});
-  $$('.select-candidate').forEach(b=>buttonAction(b,async()=>{const result=await api('/api/test-discovery/select',{method:'POST',body:{conversation_id:b.dataset.conversation}});toast('候选已选择，正在同步历史');location.href='/conversations?conversation='+result.conversation_id;}));
-  buttonAction($('#copy-test-code'),async()=>{await navigator.clipboard.writeText(p.code);toast('测试码已复制');});
-  buttonAction($('#stop-discovery'),async()=>{await api('/api/test-discovery',{method:'DELETE',body:{}});await settingsPage();toast('已结束监听；已提交请求无法撤回');});
-  const switchMode=async(channel,enabled)=>{const result=await api('/api/test-discovery/mode',{method:'PUT',body:{channel,enabled}});await settingsPage();toast(result.message);};
-  $$('.quick-ai-toggle').forEach(b=>bind(b,'change',async e=>{const enabled=e.target.checked;e.target.disabled=true;try{await switchMode(e.target.dataset.channel,enabled);}catch(error){e.target.checked=!enabled;throw error;}finally{e.target.disabled=false;}}));
+  const cards=(d.bindings||[]).map(b=>`<div class="advanced-group"><h3>${esc(b.channel)} · ${b.enabled?'AI 自动回复中':b.paused?'人工接管中':'AI 已关闭'}</h3><p class="mono-block">客户 ID：${esc(b.user_id)}<br>会话 ID：${esc(b.conversation_id)}<br>平台来源：${esc(b.source)}</p><a href="/conversations?conversation=${b.local_id}">打开会话，手动回复 →</a></div>`).join('');
+  root.innerHTML=`<div class="notice"><div><strong>${d.auto_discovery?'已启用新消息自动收集':'新消息自动收集未启用'}</strong><br><span class="muted">${d.auto_discovery?'新客户消息自动出现在消息验证页，默认 AI 关闭。事件含坐席归属时按所选坐席过滤；缺少时先展示并在后台读取会话归属，其他坐席的会话将移出列表。':'请重新保存发送坐席以恢复自动收集。'}</span></div></div>${cards}<p class="readonly-note">打开 /conversations 后会自动刷新新会话。选中会话默认 AI 关闭，在会话右侧单独点击“恢复 AI”；Webhook 最近事件可查看事件原始记录。无需填写客户 ID 或会话 ID。</p><div class="actions"><a href="/conversations">打开消息验证 →</a><button type="button" id="toggle-discovery">${d.auto_discovery?'暂停收集并关闭 AI':'使用已选坐席恢复收集'}</button></div>`;
+  buttonAction($('#toggle-discovery'),async()=>{if(d.auto_discovery)await api('/api/test-discovery',{method:'DELETE',body:{}});else await api('/api/settings',{method:'PUT',body:{reply_actor_id:$('#s-reply_actor_id').value,test_identity_allowlist:[]}});await settingsPage();toast(d.auto_discovery?'已暂停收集和 AI，已提交请求无法撤回':'已恢复收集，新会话默认 AI 关闭');});
 }
 async function refreshTestTargets() {
   S.conversations=(await api('/api/conversations')).conversations;
   const root=$('#test-targets');if(!root)return;
   const selected=$('#test-conversation')?.value;
   const scope=S.settings.values.test_identity_allowlist;
-  const scopeNote=`<p class="mono-block">${scope.length?'当前接收与外发范围：'+scope.map(esc).join('、'):'尚未绑定客户：仅在开启识别时接收匹配测试码，其余消息忽略。'}</p>${scope.length?'<button type="button" id="pause-test" class="small">暂停测试</button>':''}`;
-  root.innerHTML=scopeNote+(S.conversations.length?`<div class="field-grid test-targets"><div class="field"><label for="test-conversation">此客户的一条真实会话</label><select id="test-conversation"><option value="">请选择会话</option>${S.conversations.map(c=>`<option value="${c.id}">${esc(c.platform_id)} · ${esc(c.user_id||'客户待同步')}</option>`).join('')}</select></div><div class="field"><label for="test-channel">确认原客户渠道</label><input id="test-channel" list="test-channel-options" placeholder="请选择或填写实际渠道"><datalist id="test-channel-options"><option value="WhatsApp"><option value="WeChat"><option value="Webchat"></datalist></div></div><p id="test-source" class="readonly-note"></p><div class="actions"><button type="button" id="allow-test">只用此客户测试</button><a href="/conversations">打开消息验证 →</a></div><p class="readonly-note">替换原测试范围，仅保留此客户 ID。同一 ID 的新会话也会接收；其他客户事件不保存、不拉历史、不调用 AI。昵称和固定消息标记不能用于授权；只有主动开启的随机测试码可以绑定账号。</p>`:'<p class="muted">推荐使用上方的一次性测试码自动获取 ID；尚未配置 Webhook 时，也可以请管理员提供真实会话 ID 后手动导入。</p>');
+  const scopeNote=`<p class="mono-block">${scope.length?'当前接收与外发范围：'+scope.map(esc).join('、'):'未设置额外客户限制；自动收集状态见上方。'}</p>${scope.length?'<button type="button" id="pause-test" class="small">暂停测试</button>':''}`;
+  root.innerHTML=scopeNote+(S.conversations.length?`<div class="field-grid test-targets"><div class="field"><label for="test-conversation">此客户的一条真实会话</label><select id="test-conversation"><option value="">请选择会话</option>${S.conversations.map(c=>`<option value="${c.id}">${esc(c.platform_id)} · ${esc(c.user_id||'客户待同步')}</option>`).join('')}</select></div><div class="field"><label for="test-channel">确认原客户渠道</label><input id="test-channel" list="test-channel-options" placeholder="请选择或填写实际渠道"><datalist id="test-channel-options"><option value="WhatsApp"><option value="WeChat"><option value="Webchat"></datalist></div></div><p id="test-source" class="readonly-note"></p><div class="actions"><button type="button" id="allow-test">只用此客户测试</button><a href="/conversations">打开消息验证 →</a></div><p class="readonly-note">替换原测试范围，仅保留此客户 ID。同一 ID 的新会话也会接收；其他客户事件不保存、不拉历史、不调用 AI。此为兼容入口，日常无需绑定或填写 ID。</p>`:'<p class="muted">新会话通过 Webhook 自动出现；仅需要旧历史入口时才手动导入。</p>');
   buttonAction($('#pause-test'),async()=>{await saveSettings();S.settings=await api('/api/settings',{method:'PUT',body:{test_identity_allowlist:[],auto_reply_enabled:false}});toast('已暂停测试，新回调将忽略；已提交请求无法撤回');await settingsPage();});
   if(!S.conversations.length)return;
   if(S.conversations.some(c=>String(c.id)===selected))$('#test-conversation').value=selected;
@@ -204,7 +197,11 @@ function sectionExtra(group) {
   return '';
 }
 function showResult(title,result) {modal(title,`<pre class="mono-block">${esc(JSON.stringify(result,null,2))}</pre>`,null);}
-async function showEvents() {const data=await api('/api/events');modal('Webhook 最近事件',data.events.length?`<div class="table-wrap"><table class="data-table"><thead><tr><th>时间</th><th>事件 / 消息 ID</th><th>版本 / 重试</th></tr></thead><tbody>${data.events.map(e=>`<tr><td>${fmtTime(e.created)}</td><td>${esc(e.action)}<small class="mono">${esc(e.platform_id)}</small></td><td>${esc(e.version)} / ${esc(e.retries)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty"><h3>尚未收到真实事件</h3><p>先配置 Webhook，再在设置页开启测试码识别。绑定后的入站事件显示在此，其他客户事件忽略。</p></div>',null,'',true);}
+async function showEvents() {
+  const data=await api('/api/events');
+  modal('Webhook 最近事件',data.events.length?`<p class="muted">管理员可点击事件查看保存的原始 JSON 载荷。消息正文只在本地加密数据库中保存，新会话默认 AI 关闭，只有单会话明确启用后才调用模型。</p><div class="table-wrap"><table class="data-table"><thead><tr><th>时间</th><th>事件 / 消息 ID</th><th>版本 / 重试</th><th></th></tr></thead><tbody>${data.events.map(e=>`<tr><td>${fmtTime(e.created)}</td><td>${esc(e.action)}<small class="mono">${esc(e.platform_id||'—')}</small></td><td>${esc(e.version)} / ${esc(e.retries)}</td><td><button type="button" class="ghost small event-payload" data-event-id="${e.id}">查看原始记录</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty"><h3>尚未收到真实事件</h3><p>先保存坐席并配置 Webhook。收到新消息后会自动出现在消息验证页和这里。</p></div>',null,'',true);
+  $$('.event-payload').forEach(button=>buttonAction(button,()=>{const event=data.events.find(e=>String(e.id)===button.dataset.eventId);showResult('Webhook 原始事件 · '+(event?.platform_id||'—'),event?.payload||{message:'该事件未保存载荷'});}));
+}
 async function showMatrix() {
   const data=await api('/api/capabilities');const latest=(ch,cap)=>data.checks.find(x=>x.channel===ch&&x.capability===cap&&!x.stale);
   modal('逐渠道能力矩阵',`<p class="muted">版本 ${data.revision} · API 受理、原工作台展示和客户实际收到分别核对。灰色表示未测试，旧配置证据仅供查阅。</p>${data.channels.length?`<div class="table-wrap"><table class="data-table"><thead><tr><th>能力</th>${data.channels.map(ch=>`<th>${esc(ch)}</th>`).join('')}</tr></thead><tbody>${data.capabilities.map(cap=>`<tr><td>${labels[cap]}</td>${data.channels.map(ch=>{const check=latest(ch,cap);return `<td><button class="ghost small evidence-cell" data-check="${check?.id||''}">${pill(check?.status||'not_tested')}</button></td>`;}).join('')}</tr>`).join('')}</tbody></table></div>`:'<div class="empty"><h3>先配置实际测试渠道</h3><p>至少验证 WhatsApp 和客户指定的第二渠道；WeChat 必须测试实际连接器。</p></div>'}<div class="actions"><button type="button" id="record-evidence">记录失败 / 阻塞证据</button><button type="button" id="check-history">检查记录（${data.checks.length}）</button></div>`,null,'',true);
@@ -233,14 +230,14 @@ function assetModal(after) {
 function editAsset(a) {modal('编辑素材 · '+a.name,`<label>名称<input name="name" value="${esc(a.name)}" required></label><label>用途<textarea name="purpose" required>${esc(a.purpose)}</textarea></label><label>标签<input name="tags" value="${esc(a.tags.join(', '))}"></label><label>允许渠道<input name="channels" value="${esc(a.channels.join(', '))}"></label><label class="check-label"><input type="checkbox" name="enabled" ${a.enabled?'checked':''}>启用素材（重新启用后需重新上传确认）</label><small>替换文件请使用同一逻辑 ID 新增版本，排队任务绑定原版本。</small>`,async f=>{await api('/api/assets/'+a.id,{method:'PATCH',body:{name:f.get('name'),purpose:f.get('purpose'),tags:String(f.get('tags')).split(',').map(x=>x.trim()).filter(Boolean),channels:String(f.get('channels')).split(',').map(x=>x.trim()).filter(Boolean),enabled:f.has('enabled')}});await renderAssets();toast('素材已更新');},'保存');}
 function importModal() {modal('导入真实测试会话',`<p class="muted">读取当前平台账号有权访问的会话。填写会话 ID，或仅填写客户 ID 导入该客户的其他会话。</p><label>平台会话 ID<input name="conversation_id" value="${esc(S.settings.values.seed_conversation_id)}"></label><label>平台客户 ID<input name="user_id" value="${esc(S.settings.values.seed_user_id)}"></label><small>仅从真实接口导入，不自动合并跨渠道客户。</small>`,async f=>{const result=await api('/api/conversations/import',{method:'POST',body:Object.fromEntries(f)});toast('会话已导入，后台正在同步全部可访问历史');if(result.conversation_id)S.selected=result.conversation_id;if(S.page==='conversations')await refreshConversations();else await refreshTestTargets();},'读取并导入');}
 async function conversationsPage() {
-  $('#page').innerHTML=`<div class="pagehead"><div><div class="eyebrow">CONVERSATION WORKSPACE</div><h1>消息验证</h1><p>同一客户、同一会话、原始渠道。逐条核对真实回复。</p></div><div class="actions"><button id="conv-matrix">能力矩阵</button><button id="conv-import" class="primary">＋ 导入测试会话</button></div></div><div class="notice"><span>ⓘ</span><div><strong>真实接口待验证</strong> · 当前实现 Freshchat 路线。API 受理后，请分别核对 Omni 原工作台与客户原渠道，人工确认不会伪造送达回执。</div></div><div class="conversation-grid"><aside class="conversation-list"><div class="list-head"><h3>已接入会话 <span id="conv-count" class="pill">0</span></h3><input id="conversation-search" aria-label="按客户或会话 ID 筛选" placeholder="搜索客户 / 会话 ID"><select id="channel-filter" aria-label="按渠道筛选"><option value="">全部渠道</option>${S.settings.values.allowed_channels.map(c=>`<option>${esc(c)}</option>`).join('')}</select></div><div id="conversation-items" class="list-items"></div></aside><section id="message-pane" class="message-pane"></section><aside id="inspector" class="inspector"></aside></div>`;
-  buttonAction($('#conv-import'),importModal);buttonAction($('#conv-matrix'),showMatrix);
+  $('#page').innerHTML=`<div class="pagehead"><div><div class="eyebrow">CONVERSATION WORKSPACE</div><h1>消息验证</h1><p>同一客户、同一会话、原始渠道。逐条核对真实回复。</p></div><div class="actions"><button id="conv-matrix">能力矩阵</button><button id="conv-events" class="primary">Webhook 最近事件</button><details><summary>其他入口</summary><button id="conv-import">导入已有会话</button></details></div></div><div class="notice"><span>ⓘ</span><div><strong>真实接口待验证</strong> · 当前实现 Freshchat 路线。API 受理后，请分别核对 Omni 原工作台与客户原渠道，人工确认不会伪造送达回执。</div></div><div class="conversation-grid"><aside class="conversation-list"><div class="list-head"><h3>已接入会话 <span id="conv-count" class="pill">0</span></h3><input id="conversation-search" aria-label="按客户或会话 ID 筛选" placeholder="搜索客户 / 会话 ID"><select id="channel-filter" aria-label="按渠道筛选"><option value="">全部渠道</option>${S.settings.values.allowed_channels.map(c=>`<option>${esc(c)}</option>`).join('')}</select></div><div id="conversation-items" class="list-items"></div></aside><section id="message-pane" class="message-pane"></section><aside id="inspector" class="inspector"></aside></div>`;
+  buttonAction($('#conv-import'),importModal);buttonAction($('#conv-matrix'),showMatrix);buttonAction($('#conv-events'),showEvents);
   bind($('#conversation-search'),'input',renderConversationList);bind($('#channel-filter'),'change',renderConversationList);
   await refreshConversations(true);
 }
 async function refreshConversations(force=false) {
   const result=await api('/api/conversations');if(S.page!=='conversations')return;
-  S.conversations=result.conversations;renderConversationList();
+  S.conversations=result.conversations;const filter=$('#channel-filter'),selectedChannel=filter.value;filter.innerHTML='<option value="">全部渠道</option>'+[...new Set(S.conversations.map(c=>c.channel))].map(ch=>`<option>${esc(ch)}</option>`).join('');filter.value=selectedChannel;renderConversationList();
   if(S.selected&&!S.conversations.some(c=>c.id===S.selected)){S.selected=null;S.detail=null;}
   if(!S.selected){emptyConversation();return;}
   const requested=S.selected;
@@ -261,13 +258,12 @@ function renderConversationList() {
   const q=($('#conversation-search')?.value||'').toLowerCase(),channel=$('#channel-filter')?.value;
   const rows=S.conversations.filter(c=>(!q||(c.platform_id+' '+c.user_id).toLowerCase().includes(q))&&(!channel||c.channel===channel));
   $('#conv-count').textContent=S.conversations.length;
-  $('#conversation-items').innerHTML=rows.length?rows.map(c=>`<button class="conversation-item ${c.id===S.selected?'selected':''}" data-id="${c.id}"><strong>${esc(c.user_id||c.platform_id)}</strong>${pill('',c.channel)} <span class="pill">${c.mode==='manual'?'人工':c.mode==='auto'?'自动':'AI 关闭'}</span><p>${esc(c.preview||'正在同步历史…')}</p><small class="mono">${esc(c.platform_id)}</small></button>`).join(''):`<div class="empty"><small>${S.conversations.length?'没有匹配的会话':'暂无真实会话'}<br>先导入，再绑定测试客户</small></div>`;
+  $('#conversation-items').innerHTML=rows.length?rows.map(c=>`<button class="conversation-item ${c.id===S.selected?'selected':''}" data-id="${c.id}"><strong>${esc(c.user_id||c.platform_id)}</strong>${pill('',c.channel)} <span class="pill">${c.mode==='manual'?'人工':c.mode==='auto'?'自动':'AI 关闭'}</span><p>${esc(c.preview||'正在同步历史…')}</p><small class="mono">${esc(c.platform_id)}</small></button>`).join(''):`<div class="empty"><small>${S.conversations.length?'没有匹配的会话':'暂无真实会话'}<br>保存发送坐席后，Webhook 会自动接收新消息</small></div>`;
   $$('.conversation-item').forEach(b=>buttonAction(b,async()=>{if(S.drafts.length||$('#message-text')?.value){if(!confirm('切换会话将清空当前未发送草稿，继续？'))return;}S.drafts=[];S.selected=Number(b.dataset.id);S.detail=null;S.limit=50;await refreshConversations(true);}));
 }
 function emptyConversation() {
-  $('#message-pane').innerHTML=`<div class="empty"><div class="empty-symbol">↔</div><div class="eyebrow">READY WHEN YOU ARE</div><h2>${S.conversations.length?'选择一个会话开始验证':'从第一条真实消息开始'}</h2><p>在设置页监听下一批会话，用自己的账号发送普通消息，<br>点选候选后即可读取历史并验证。</p><button class="primary" id="empty-import">导入测试会话</button><div class="step-list"><span><b>1</b>配置平台</span><span><b>2</b>接收事件</span><span><b>3</b>核对回复</span></div></div>`;
+  $('#message-pane').innerHTML=`<div class="empty"><div class="empty-symbol">↔</div><div class="eyebrow">READY WHEN YOU ARE</div><h2>${S.conversations.length?'选择一个会话开始验证':'等待第一条真实消息'}</h2><p>保存设置页的发送坐席后，用 WhatsApp 或 WeChat 发一条公开消息，<br>Webhook 会自动取得会话并显示在这里。</p><a class="primary" href="/settings">查看连接设置</a><div class="step-list"><span><b>1</b>配置平台</span><span><b>2</b>接收事件</span><span><b>3</b>单会话开关 AI</span></div></div>`;
   $('#inspector').innerHTML=`<div class="inspector-section"><h3>AI 助理</h3>${pill('','未选择会话')}<p class="muted">生成预览不外发。开启自动回复前，先完成当前渠道的能力验证。</p></div><div class="inspector-section"><h3>验证的三个层次</h3><p class="muted">01　API 受理及消息 ID<br>02　Omni 原时间线可见<br>03　客户原渠道实际收到</p></div><div class="inspector-section"><h3>人工优先</h3><p class="muted">提交手动消息会暂停 AI。已在途请求无法撤回，其余未发送任务取消。</p></div>`;
-  buttonAction($('#empty-import'),importModal);
 }
 function threadHeader() {const d=S.detail,c=d.conversation;return `<div class="thread-head"><div><h3>${esc(c.user_id||'客户 ID 待同步')}</h3><small class="mono">${esc(c.platform_id)}</small></div><div class="actions">${pill('',c.channel)}<button id="sync-history" class="small">同步历史</button><button id="same-user" class="small" ${c.user_id?'':'disabled'}>同客户会话</button></div></div><div id="thread-meta" class="thread-meta"></div>`;}
 function renderThread() {
@@ -288,7 +284,7 @@ function messageHTML(m) {
   }).join('')}<small class="media-fallback hidden">预览受来源白名单、链接有效期或浏览器限制；不代表客户发送失败。</small></div><span class="mono">${esc(m.platform_id)}${m.interaction?' · interaction '+esc(m.interaction):''}</span></article>`;
 }
 function updateThread(scroll=false) {
-  const d=S.detail,c=d.conversation;$('#thread-meta').innerHTML=`已同步 ${d.total} 条 · ${c.sync_complete?'所有可访问历史已同步':'同步尚未完成'}<br>${esc(d.earliest||'—')} → ${esc(d.latest||'—')}<br>来源 ${esc(c.source||'未知')} · Topic ${esc(c.topic_id||'未提供')}${c.sync_error?`<span class="error-text"> · ${esc(c.sync_error)}</span>`:''}`;
+  const d=S.detail,c=d.conversation;$('#thread-meta').innerHTML=`已同步 ${d.total} 条 · ${c.sync_complete?'所有可访问历史已同步':'同步尚未完成'}<br>${esc(d.earliest||'—')} → ${esc(d.latest||'—')}<br>来源 ${esc(c.source||'未知')} · Topic ${esc(c.topic_id||'未提供')} · 坐席归属 ${esc(c.assigned_agent_id||'平台未提供，请核对目标')}${c.sync_error?`<span class="error-text"> · ${esc(c.sync_error)}</span>`:''}`;
   const thread=$('#thread');if(!thread)return;const nearBottom=thread.scrollHeight-thread.scrollTop-thread.clientHeight<80;
   const content=(d.next_before!==null?'<button class="small" id="load-earlier">加载更早消息</button>':'')+d.messages.map(messageHTML).join('');
   if(thread.dataset.signature!==content){thread.innerHTML=content;thread.dataset.signature=content;if(scroll||nearBottom)thread.scrollTop=thread.scrollHeight;buttonAction($('#load-earlier'),async()=>{if(S.limit>=100){const older=await api('/api/conversations/'+S.selected+'/messages?before='+d.next_before+'&limit=100');S.detail.messages=[...older.messages,...d.messages];S.detail.next_before=older.next_before;updateThread();}else {S.limit=100;await refreshConversations();}});
@@ -312,7 +308,7 @@ function renderInspector() {
   $$('#inspector details').forEach(el=>{if(openSections.includes($('summary',el)?.textContent))el.open=true;});
   buttonAction($('#ai-preview'),async()=>{await api('/api/conversations/'+S.selected+'/ai-preview',{method:'POST',body:{}});toast('真实模型预览已排队，不会发送给客户');});
   buttonAction($('#manual-mode'),async()=>{const result=await api('/api/conversations/'+S.selected+'/mode',{method:'PUT',body:{mode:'manual'}});toast(result.message);await refreshConversations();});
-  buttonAction($('#auto-mode'),()=>modal('明确恢复此会话 AI',`<p>会话：<span class="mono">${esc(c.platform_id)}</span></p><p class="muted">从恢复后的新消息开始。全局自动回复及当前渠道能力检查必须已通过。</p>`,async()=>{await api('/api/conversations/'+c.id+'/mode',{method:'PUT',body:{mode:'auto'}});await refreshConversations();toast('AI 已恢复，仅处理新的客户消息');},'恢复 AI'));
+  buttonAction($('#auto-mode'),()=>modal('明确恢复此会话 AI',`<p>会话：<span class="mono">${esc(c.platform_id)}</span></p><p class="muted">仅为此会话开启 AI，从开启后的新客户消息开始；每次携带该会话最近可用公开历史。请先完成 OpenAI 检查及当前会话历史同步，无需全局开关。</p>`,async()=>{await api('/api/conversations/'+c.id+'/mode',{method:'PUT',body:{mode:'auto'}});await refreshConversations();toast('AI 已恢复，仅处理新的客户消息');},'恢复 AI'));
   buttonAction($('#create-ticket'),()=>modal('创建或复用跟进工单',`<label>跟进事项<textarea name="reason" required>${esc(generated?.result.plan.ticket_reason||'')}</textarea></label><label class="check-label"><input type="checkbox" name="new_matter">明确开启新的跟进事项，允许另建工单</label><small>默认返回当前会话已有工单。提交结果不明时不会自动重建。</small>`,async f=>{await api('/api/conversations/'+c.id+'/ticket',{method:'POST',body:{reason:f.get('reason'),new_matter:f.has('new_matter')}});await refreshConversations();toast('工单任务已提交或已有记录已复用');},'确认'));
   $$('.verify-job').forEach(b=>buttonAction(b,()=>verifyModal(b.dataset.id)));
   $$('.resolve-job').forEach(b=>buttonAction(b,()=>resolveModal(b.dataset.id)));
