@@ -3,9 +3,9 @@
   "date": "2026-09-22",
   "unit_tests": {
     "command": ".venv/bin/python -m unittest discover -s tests -p 'test_*.py' -v",
-    "passed": 80,
+    "passed": 81,
     "failed": 0,
-    "duration_seconds": 12.413
+    "duration_seconds": 13.108
   },
   "syntax": [
     "python compileall passed",
@@ -155,5 +155,23 @@
     "raw_payload": "encrypted at rest; administrator view",
     "second_channel_keeps_first_mode": true,
     "production_outbound_calls": 0
+  },
+  "openai_proxy_dns_fix": {
+    "date": "2026-09-22",
+    "scope": "official_openai_via_loopback_http_proxy",
+    "local_regressions": "passed: remote hostname resolution, TLS/Host preservation, custom host public IP pinning, non-public targets blocked, no direct fallback",
+    "live_check": {
+      "status": "passed",
+      "http_status": 200,
+      "model": "gpt-6-astra",
+      "elapsed_ms": 6168,
+      "input_tokens": 406,
+      "output_tokens": 52,
+      "total_tokens": 458,
+      "provider_request_id_present": true,
+      "customer_messages_sent": 0
+    },
+    "browser_rerun": false,
+    "verification": "authenticated POST /api/checks with kind=openai after normal server restart; only synthetic connection-check prompt sent"
   }
 }

@@ -101,12 +101,13 @@ class PinnedHTTPS(http.client.HTTPSConnection):
             self.proxy = ("127.0.0.1" if p.hostname == "localhost" else p.hostname, port)
 
     def connect(self):
-        # Connect to the address we checked; TLS still verifies the original hostname.
-        addresses = public_addresses(self.host)
+        # Only the fixed official OpenAI host delegates DNS to the trusted loopback proxy.
+        # Local DNS can be polluted or use fake IPs; custom hosts still require a pinned public IP.
+        target = self.host if self.proxy and self.host == "api.openai.com" else public_addresses(self.host)[0]
         if self.proxy:
             tunnel = http.client.HTTPConnection(*self.proxy, timeout=self.timeout)
             try:
-                tunnel.set_tunnel(addresses[0], 443)
+                tunnel.set_tunnel(target, 443)
                 tunnel.connect()
                 self.sock, tunnel.sock = tunnel.sock, None
             except (OSError, http.client.HTTPException):
@@ -114,7 +115,7 @@ class PinnedHTTPS(http.client.HTTPSConnection):
             finally:
                 tunnel.close()
         else:
-            self.sock = socket.create_connection((addresses[0], 443), self.timeout)
+            self.sock = socket.create_connection((target, 443), self.timeout)
         self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
 
 

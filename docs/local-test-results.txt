@@ -38,9 +38,9 @@ test_network_unknown_restart_does_not_resend (test_demo.DemoTests.test_network_u
 test_new_conversation_uses_global_enable_boundary (test_demo.DemoTests.test_new_conversation_uses_global_enable_boundary) ... ok
 test_older_event_does_not_cancel_or_regenerate_newest (test_demo.DemoTests.test_older_event_does_not_cancel_or_regenerate_newest) ... ok
 test_only_openai_uses_https_proxy_environment (test_demo.DemoTests.test_only_openai_uses_https_proxy_environment) ... ok
-test_openai_proxy_connect_pins_public_ip_and_preserves_tls_and_host (test_demo.DemoTests.test_openai_proxy_connect_pins_public_ip_and_preserves_tls_and_host) ... ok
 test_openai_proxy_failure_never_falls_back_to_direct (test_demo.DemoTests.test_openai_proxy_failure_never_falls_back_to_direct) ... ok
 test_openai_proxy_rejects_unsafe_config_and_private_target (test_demo.DemoTests.test_openai_proxy_rejects_unsafe_config_and_private_target) ... ok
+test_openai_proxy_resolves_official_hostname_and_preserves_tls_and_host (test_demo.DemoTests.test_openai_proxy_resolves_official_hostname_and_preserves_tls_and_host) ... ok
 test_outbound_evidence_requires_all_three_layers (test_demo.DemoTests.test_outbound_evidence_requires_all_three_layers) ... ok
 test_pairing_expiry_rotation_configuration_and_stop (test_demo.DemoTests.test_pairing_expiry_rotation_configuration_and_stop) ... ok
 test_pairing_filters_signature_roles_other_customers_and_consumed_code (test_demo.DemoTests.test_pairing_filters_signature_roles_other_customers_and_consumed_code) ... ok
@@ -52,6 +52,7 @@ test_pairing_source_conflict_and_model_failure_do_not_send (test_demo.DemoTests.
 test_pairing_stop_during_model_check_cannot_reenable_or_send (test_demo.DemoTests.test_pairing_stop_during_model_check_cannot_reenable_or_send) ... ok
 test_pairing_two_channels_activate_without_faking_acceptance_and_takeover (test_demo.DemoTests.test_pairing_two_channels_activate_without_faking_acceptance_and_takeover) ... ok
 test_platform_credential_change_clears_test_scope (test_demo.DemoTests.test_platform_credential_change_clears_test_scope) ... ok
+test_proxy_dns_exception_is_only_for_official_openai_through_local_proxy (test_demo.DemoTests.test_proxy_dns_exception_is_only_for_official_openai_through_local_proxy) ... ok
 test_public_key_rejects_invalid_private_non_rsa_and_weak_keys (test_demo.DemoTests.test_public_key_rejects_invalid_private_non_rsa_and_weak_keys) ... ok
 test_quick_start_agents_pagination_filtering_and_errors (test_demo.DemoTests.test_quick_start_agents_pagination_filtering_and_errors) ... ok
 test_quick_start_model_defaults_and_existing_config_migration (test_demo.DemoTests.test_quick_start_model_defaults_and_existing_config_migration) ... ok
@@ -80,6 +81,6 @@ test_webhook_atomic_persist_failure (test_demo.DemoTests.test_webhook_atomic_per
 test_wrong_channel_cannot_send_and_not_support_false_switch (test_demo.DemoTests.test_wrong_channel_cannot_send_and_not_support_false_switch) ... ok
 
 ----------------------------------------------------------------------
-Ran 80 tests in 12.413s
+Ran 81 tests in 13.108s
 
 OK

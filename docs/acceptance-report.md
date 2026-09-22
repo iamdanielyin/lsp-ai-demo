@@ -4,7 +4,7 @@
 
 ## 本次归档复验（2026-09-22）
 
-- 全量80项自动化测试通过，Python编译、JavaScript语法和 `pip check` 通过；输出已更新。
+- 全量81项自动化测试通过，Python编译、JavaScript语法和 `pip check` 通过；输出已更新。
 - 在独立临时空目录运行初始化和 `run.py`：随机启动参数生成、已有.env拒绝覆盖、SQLite自动建库、页面HTTP200、首次管理员登录、空业务密钥及自动回复关闭均通过；临时实例已停止，没有改正常实例业务配置。
 - [需求](requirements.md)、[技术与源码导航](architecture.md)、[运行手册](runbook.md)、[全部参数](configuration-reference.md)、[测试过程](testing-guide.md) 已补齐；44个 `DEFAULTS` 参数均有独立表格项，文档链接和JSON有效。
 - 本轮已在独立临时数据库验证自动发现、单会话 AI/人工切换、双渠道隔离、原始事件查看与暂停/恢复收集；1440×1000、390×844 页面截图已检查，浏览器无运行错误。下面的历史回归截图仍保留，不代表客户渠道验收。
@@ -26,7 +26,7 @@
 
 ## 已完成的本地验证
 
-执行 `.venv/bin/python -m unittest discover -s tests -p 'test_*.py'`：**80 项通过，0 失败，12.413 秒**。完整输出：[local-test-results.txt](local-test-results.txt)。机器可读摘要：[local-evidence.json](local-evidence.json)。Python 编译、JavaScript 语法和 `pip check` 通过。
+执行 `.venv/bin/python -m unittest discover -s tests -p 'test_*.py'`：**81 项通过，0 失败，13.108 秒**。完整输出：[local-test-results.txt](local-test-results.txt)。机器可读摘要：[local-evidence.json](local-evidence.json)。Python 编译、JavaScript 语法和 `pip check` 通过。
 
 测试使用临时数据库、合成 RSA 签名、受控平台/模型响应，并阻止意外真实网络连接。覆盖：
 
@@ -139,3 +139,10 @@
 - 单进程全局 worker 适合验证量级；无多副本部署/高并发承诺。审核素材和审计记录保留，历史缓存清理受活动/未核验任务保护，可能超过设定天数。
 - 缺少真实数据，不提供固定回复秒数、准确率或稳定性承诺。本轮验证发送的真实自动回复数量 **0**，本轮真实模型请求数 **0**；每渠道10条自动回复及连续追问观测均未进行。
 - 本次没有生产部署、公网发布、真实平台写入或客户消息外发。运行源码和本地结果已交付，客户租户总体通过结论仍须完成上述验证。
+
+## OpenAI 本地代理 DNS 修复（2026-09-22）
+
+- 根因：本机 DNS 对官方域名返回非公网 IPv6，旧实现先解析全部地址再连接本地代理，导致检查直接被拒绝。
+- 官方 `api.openai.com` 经本机 HTTP 代理时改为 CONNECT 域名，由代理解析；TLS 域名/证书校验保留。自定义地址和直连仍验证并绑定公网 IP；私网目标、重定向和代理失败后的直连回退继续拒绝。
+- 81项本地回归全部通过。正常后台重启后，通过管理员鉴权的 `POST /api/checks` 执行一次真实 `gpt-6-astra` 连接检查：HTTP 200、6168毫秒、输入406/输出52/合计458 tokens，存在供应商请求ID。只发送内置测试提示，未发送客户会话或客户消息。
+- 这是模型连通性验证，不代表 WhatsApp/WeChat 收发验收；前面的渠道验收状态保持未测试。本轮未改UI，以实际管理API返回体验证，未重复浏览器截图。

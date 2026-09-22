@@ -52,7 +52,7 @@ export all_proxy=socks5://127.0.0.1:7897
 
 OpenAI 的连接检查、预览和自动回复统一读取 `https_proxy`，兼容大写 `HTTPS_PROXY`，通过 HTTP CONNECT 发送 HTTPS 请求。此处不使用 `http_proxy`、`all_proxy` 或 `NO_PROXY` 决定路由；无需安装 SOCKS 依赖。代理必须为本机 HTTP 地址，不能把 SOCKS URL 填入 `https_proxy`。Freshchat、Freshdesk 和素材下载保持直连。
 
-代理失败会明确报错，不自动退回直连；目标仍须为公网 HTTPS，CONNECT 绑定已验证的公网 IP，TLS 仍校验原目标域名。代理服务需持续运行。重启后在设置页点击“检查 OpenAI”验证实际模型和凭证；该检查有少量真实用量，不发送客户消息。
+代理失败会明确报错，不自动退回直连。官方 `api.openai.com` 通过本地代理时，CONNECT 使用域名，由代理解析，兼容本机 DNS 污染或代理 Fake-IP 模式；TLS 仍校验官方域名及证书。这个例外只适用于该精确主机和已配置的本机代理。自定义 OpenAI 主机及所有直连请求仍校验全部 DNS 结果并绑定已验证的公网 IP，不放行内网地址或任意重定向。代理服务需持续运行。重启后在设置页点击“检查 OpenAI”验证实际模型和凭证；该检查有少量真实用量，不发送客户消息。
 
 ## 本机日常启动与停止
 
@@ -71,7 +71,7 @@ OpenAI 的连接检查、预览和自动回复统一读取 `https_proxy`，兼�
 5. 将设置页的 `https://<DEMO_HOST>/api/webhooks/freshchat` 填到 Freshchat Webhooks，复制对应公钥回 Demo。详细平台操作见 [平台指引](platform-setup.md)。
 6. 在设置页保存发送坐席，用测试账号发送任意普通消息；新会话会自动进入 `/conversations` 并同步历史。平台真实签名事件、同一对象历史、原渠道回信全部通过后才做实际验收。
 
-当前服务不信任任意 `X-Forwarded-*`；写接口 Origin 接受服务 origin、保留 Host 的同主机同端口 HTTPS origin，或已保存公网 origin。管理入口与 Webhook 地址可不同；更换隧道不会放行其他域名的跨站写请求，CSRF 校验始终保留。非本地入口须使用 HTTPS；隧道须保留 Host，不要通过取消 CSRF 来解决代理配置错误。所有出站请求保留公网 DNS/IP 验证与 TLS；OpenAI 可按上述启动参数使用本地 HTTP 代理。
+当前服务不信任任意 `X-Forwarded-*`；写接口 Origin 接受服务 origin、保留 Host 的同主机同端口 HTTPS origin，或已保存公网 origin。管理入口与 Webhook 地址可不同；更换隧道不会放行其他域名的跨站写请求，CSRF 校验始终保留。非本地入口须使用 HTTPS；隧道须保留 Host，不要通过取消 CSRF 来解决代理配置错误。出站请求保留 TLS 和目标校验；仅官方 OpenAI 经本机代理时委托代理解析域名，详见上节。
 
 ## 配置和备份
 
@@ -95,6 +95,7 @@ OpenAI 的连接检查、预览和自动回复统一读取 `https_proxy`，兼�
 | 平台403/404 | 403核权限；404核对官方区域主机、真实ID和租户API形态。新版Ticket不能填作Freshchat会话 |
 | 自定义AI接口失败 | 必须公网HTTPS443、Responses与严格结构化输出兼容；不支持只提供Chat Completions、URL查询鉴权或API重定向 |
 | 本地 OpenAI 代理连接失败 | 检查代理软件已启动、HTTP端口可达，`https_proxy`使用本机`http://`地址；改环境变量后重启后台，再检查OpenAI |
+| DNS 指向非公网地址 | 官方 OpenAI 配合本机代理时由代理解析，无需改 API 地址。自定义主机和直连仍要求公网 DNS；应修复该主机的 DNS/代理排除规则，不要关闭 SSRF 校验 |
 | 媒体不可用 / AV_PENDING | 核对上传状态、用途、渠道、大小及白名单；扫描未完成不能标可发；不反复重发结果不明项 |
 | 保存后AI关闭 | 这是配置版本失效规则；重新检查/识别，不能直接改数据库强开 |
 | 客户没收到但API成功 | 分别核对工作台、渠道限制和设备，不将HTTP2xx当送达；先查证再人工重试 |

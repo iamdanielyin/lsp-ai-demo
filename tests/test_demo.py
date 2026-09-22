@@ -840,7 +840,7 @@ class DemoTests(unittest.TestCase):
                 providers.freshdesk(s,'/tickets')
                 self.assertIsNone(request.call_args.kwargs.get('proxy'))
 
-    def test_openai_proxy_connect_pins_public_ip_and_preserves_tls_and_host(self):
+    def test_openai_proxy_resolves_official_hostname_and_preserves_tls_and_host(self):
         tunnel=Mock()
         tunnel.makefile.return_value=io.BytesIO(b'HTTP/1.1 200 Connection established\r\n\r\n')
         tls=Mock()
@@ -848,23 +848,45 @@ class DemoTests(unittest.TestCase):
         context=ssl.create_default_context()
         self.assertTrue(context.check_hostname)
         self.assertEqual(context.verify_mode,ssl.CERT_REQUIRED)
-        with patch('lsp.security.public_addresses',return_value=['8.8.8.8']) as resolve, \
+        with patch('socket.getaddrinfo',return_value=[(10,1,6,'',('2001::6817:7dbd',443,0,0))]) as resolve, \
              patch('socket.create_connection',return_value=tunnel) as connect, \
              patch('ssl.create_default_context',return_value=context), \
              patch.object(context,'wrap_socket',return_value=tls) as wrap:
             data,_=security.json_request('https://api.openai.com/v1/responses','POST',
                 {'Authorization':'Bearer synthetic-key'},{'store':False},proxy='http://127.0.0.1:7897')
         self.assertEqual(data,{})
-        resolve.assert_called_once_with('api.openai.com')
+        resolve.assert_not_called()
         self.assertEqual(connect.call_args.args[0],('127.0.0.1',7897))
         wrap.assert_called_once_with(tunnel,server_hostname='api.openai.com')
         connect_bytes=b''.join(call.args[0] for call in tunnel.sendall.call_args_list)
-        self.assertIn(b'CONNECT 8.8.8.8:443 HTTP/',connect_bytes)
+        self.assertIn(b'CONNECT api.openai.com:443 HTTP/',connect_bytes)
         self.assertNotIn(b'synthetic-key',connect_bytes)
         encrypted_bytes=b''.join(call.args[0] for call in tls.sendall.call_args_list)
         self.assertIn(b'Host: api.openai.com\r\n',encrypted_bytes)
         self.assertIn(b'Authorization: Bearer synthetic-key\r\n',encrypted_bytes)
         tls.close.assert_called_once()
+
+    def test_proxy_dns_exception_is_only_for_official_openai_through_local_proxy(self):
+        for host,proxy in [('api.openai.com',None), ('api.openai.com.evil.example','http://127.0.0.1:7897'),
+                           ('gateway.example','http://127.0.0.1:7897')]:
+            with self.subTest(host=host,proxy=proxy), \
+                 patch('socket.getaddrinfo',return_value=[(2,1,6,'',('198.18.0.1',443))]), \
+                 patch('socket.create_connection') as connect:
+                with self.assertRaises(security.Problem) as error:
+                    security.request('https://'+host+'/v1/responses',proxy=proxy)
+                self.assertEqual(error.exception.code,'private_host')
+                connect.assert_not_called()
+        context=ssl.create_default_context()
+        tunnel=Mock()
+        with patch('lsp.security.public_addresses',return_value=['8.8.8.8']) as resolve, \
+             patch('http.client.HTTPConnection',return_value=tunnel), \
+             patch.object(context,'wrap_socket') as wrap:
+            conn=security.PinnedHTTPS('gateway.example',context=context,proxy='http://127.0.0.1:7897')
+            conn.connect()
+            conn.close()
+        resolve.assert_called_once_with('gateway.example')
+        tunnel.set_tunnel.assert_called_once_with('8.8.8.8',443)
+        self.assertEqual(wrap.call_args.kwargs['server_hostname'],'gateway.example')
 
     def test_openai_proxy_rejects_unsafe_config_and_private_target(self):
         for proxy in ('socks5://127.0.0.1:7897','http://evil.example:7897','http://192.168.1.1:7897',
