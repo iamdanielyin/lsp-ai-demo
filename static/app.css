@@ -820,6 +820,13 @@ hr {
 .inspector .actions {
   margin-top:12px
 }
+.task-list {
+  max-height:min(420px,50vh);
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+  padding-right:6px
+}
 .job {
   padding:10px 0;
   border-bottom:1px solid var(--line);
