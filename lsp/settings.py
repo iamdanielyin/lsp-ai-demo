@@ -17,7 +17,7 @@ DEFAULTS = {
     "ticket_policy": "manual", "ticket_allowed_reasons": [],
     "openai_api_key": "", "openai_base_url": "https://api.openai.com/v1", "openai_model": "gpt-6-astra",
     "openai_project": "", "openai_organization": "",
-    "system_instructions": "你是 LSP 停車客服測試助理，使用繁體中文，回答簡潔、準確。不確定時請轉人工。",
+    "system_instructions": "你是 LSP 停車客服測試助理，使用繁體中文，回答簡潔、準確。不確定時如實說明無法確認，建議人工協助，不要編造。",
     "knowledge_text": "", "max_output_tokens": 4096, "context_token_budget": 12000,
     "model_timeout_seconds": 60, "store": False, "auto_reply_enabled": False,
     "debounce_ms": 1500, "max_reply_messages": 3, "ai_requests_per_minute": 10,

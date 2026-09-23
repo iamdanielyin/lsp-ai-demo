@@ -967,6 +967,24 @@ class DemoTests(unittest.TestCase):
         sent=self.db.one("SELECT * FROM jobs WHERE kind='send'");self.assertEqual(sent['origin'],'ai');self.assertEqual(sent['state'],'accepted')
         self.assertEqual(self.db.one('SELECT tokens FROM usage')['tokens'],150)
 
+    def test_uncertain_ai_plan_still_sends_honest_reply(self):
+        self.enable();self.webhook();self.db.run("UPDATE jobs SET state='cancelled' WHERE kind='sync'");self.db.run('UPDATE jobs SET due=0')
+        plan={'messages':[],'needs_human':True,'ticket_reason':None}
+        with patch.object(self.svc,'sync',return_value={}),patch('lsp.providers.openai',return_value=(self.model_response(plan),'req_uncertain')),patch('lsp.providers.send_message',return_value={'id':'out-uncertain'}) as send:
+            self.svc.drain();self.assertEqual(send.call_count,1)
+        sent=self.db.one("SELECT * FROM jobs WHERE kind='send'")
+        self.assertIn('無法確認',self.db.unseal(sent['payload'])['text'])
+        self.assertEqual(self.svc.conv(self.c['id'])['mode'],'auto')
+
+    def test_human_suggestion_keeps_model_reply_and_ai_enabled(self):
+        self.enable();self.webhook();self.db.run("UPDATE jobs SET state='cancelled' WHERE kind='sync'");self.db.run('UPDATE jobs SET due=0')
+        plan={'messages':[self.text('我无法确认，请补充停车场名称。')],'needs_human':True,'ticket_reason':None}
+        with patch.object(self.svc,'sync',return_value={}),patch('lsp.providers.openai',return_value=(self.model_response(plan),'req_suggestion')) as model,patch('lsp.providers.send_message',return_value={'id':'out-suggestion'}) as send:
+            self.svc.drain();send.assert_called_once()
+        self.assertEqual(send.call_args.args[2],plan['messages'][0])
+        self.assertNotIn('tools',model.call_args.args[1])
+        self.assertEqual(self.svc.conv(self.c['id'])['mode'],'auto')
+
     def test_ticket_dedup_requester_auth_payload_and_unknown(self):
         first=self.svc.create_ticket(self.c['id'],'需要人工跟进');second=self.svc.create_ticket(self.c['id'],'连续追问')
         self.assertEqual(first['job_id'],second['job_id'])

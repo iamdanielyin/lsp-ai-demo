@@ -58,7 +58,7 @@ Webhook 是消息到达平台后的异步通知，不是代理或前置拦截。
 | F09 | 客户媒体保留真实信息，预览受权限/格式限制，不编造媒体内容 | `normalize_message`、授权媒体路由；T08/T16 |
 | F10 | 真实 Responses 调用、严格计划、上下文范围/截断/耗时/用量 | `lsp/providers.py`、`Service.generate`；T05/T09 |
 | F11 | 模型只选择已审核素材；服务器验证 ID、版本、类型、渠道和条数 | `Service.validate_plan`；T07/T09/T16 |
-| F12 | 生成预览不外发，防抖、逐会话有效性检查、旧计划取消 | `Service.generate`、`assert_current`；T10/T12 |
+| F12 | 开启后直接自动回复，防抖、逐会话有效性检查、旧计划取消 | `Service.generate`、`assert_current`；T10/T12 |
 | F13 | 人工优先，手动关闭或开启，重启保留边界，不补发旧历史 | `Service.set_mode`、`recover_after_restart`；T11/T12/T13 |
 | F14 | Freshdesk requester 正确映射、工单摘要/来源/链接、重复事项复用 | `Service.create_ticket`、`submit_ticket`；T14 |
 | F15 | API受理、Omni可见、客户收到分层记录；人工证据不冒充机器回执 | `Service.verify_outbound`；T06/T07/T09/T15 |

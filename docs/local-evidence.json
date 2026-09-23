@@ -1,11 +1,11 @@
 {
   "scope": "local_only_synthetic_providers_not_tenant_acceptance",
-  "date": "2026-09-22",
+  "date": "2026-09-23",
   "unit_tests": {
-    "command": ".venv/bin/python -m unittest discover -s tests -p 'test_*.py' -v",
-    "passed": 81,
+    "command": ".venv/bin/python -m unittest discover -s tests -v",
+    "passed": 83,
     "failed": 0,
-    "duration_seconds": 13.108
+    "duration_seconds": 14.984
   },
   "syntax": [
     "python compileall passed",
@@ -108,7 +108,8 @@
     "empty model migrated to gpt-6-astra; auto remains off; settings HTTP 200",
     "OpenAI address update: normal server restarted; authenticated settings HTTP 200, default URL persisted, auto off, secrets masked",
     "2026-09-21 pairing update: authenticated discovery HTTP 200, no bindings or enrollment; auto off, secret fields masked",
-    "2026-09-22: normal 8127 server restarted; authenticated settings masked, auto-discovery active, events list valid, settings and conversations HTTP 200, cpolar URL retained, global AI off"
+    "2026-09-22: normal 8127 server restarted; authenticated settings masked, auto-discovery active, events list valid, settings and conversations HTTP 200, cpolar URL retained, global AI off",
+    "2026-09-23: 8127 restarted with loopback OpenAI proxy; no generating or sending jobs at restart; pages and authenticated settings/conversations HTTP200; masked secrets; updated JS served"
   ],
   "inbound_isolation": {
     "scope": "legacy_explicit_allowlist_mode_synthetic_signed_events_only",
@@ -173,5 +174,41 @@
     },
     "browser_rerun": false,
     "verification": "authenticated POST /api/checks with kind=openai after normal server restart; only synthetic connection-check prompt sent"
+  },
+  "direct_reply_simplification": {
+    "date": "2026-09-23",
+    "scope": "local_synthetic_only",
+    "passed_local": true,
+    "checks": [
+      "single conversation on/off without confirmation dialog",
+      "no AI preview button",
+      "new customer message generates and sends directly",
+      "two public history messages in model context",
+      "needs_human with text preserves the answer and AI mode",
+      "empty needs_human plan gets an honest fallback",
+      "model request has no tools",
+      "AI off receives history without generating replies",
+      "WhatsApp off while WeChat continues",
+      "manual send switches WeChat to manual",
+      "runtime errors and console messages empty",
+      "local HTTP responses and task bodies checked",
+      "desktop and mobile screenshots inspected; no horizontal overflow"
+    ],
+    "viewports": [
+      {
+        "width": 1440,
+        "height": 1000
+      },
+      {
+        "width": 390,
+        "height": 844
+      }
+    ],
+    "screenshots": [
+      "local-screenshots/direct-reply-desktop.png",
+      "local-screenshots/direct-reply-mobile.png"
+    ],
+    "real_customer_messages_sent": 0,
+    "live_model_calls": 0
   }
 }

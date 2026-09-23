@@ -26,6 +26,7 @@ test_freshdesk_basic_auth_and_file_part_mapping (test_demo.DemoTests.test_freshd
 test_full_history_pagination_over_50_and_dedup (test_demo.DemoTests.test_full_history_pagination_over_50_and_dedup) ... ok
 test_history_failure_never_claims_complete (test_demo.DemoTests.test_history_failure_never_claims_complete) ... ok
 test_http_redirect_target_revalidated (test_demo.DemoTests.test_http_redirect_target_revalidated) ... ok
+test_human_suggestion_keeps_model_reply_and_ai_enabled (test_demo.DemoTests.test_human_suggestion_keeps_model_reply_and_ai_enabled) ... ok
 test_invalid_plans_unknown_asset_empty_and_extra_fields (test_demo.DemoTests.test_invalid_plans_unknown_asset_empty_and_extra_fields) ... ok
 test_local_http_cookies_work_with_public_webhook_configured (test_demo.DemoTests.test_local_http_cookies_work_with_public_webhook_configured) ... ok
 test_malformed_signed_payload_and_cross_conversation_history (test_demo.DemoTests.test_malformed_signed_payload_and_cross_conversation_history) ... ok
@@ -74,6 +75,7 @@ test_sync_cursor_ignores_newer_webhook_and_fills_gap (test_demo.DemoTests.test_s
 test_takeover_during_inflight_truthful (test_demo.DemoTests.test_takeover_during_inflight_truthful) ... ok
 test_ticket_dedup_requester_auth_payload_and_unknown (test_demo.DemoTests.test_ticket_dedup_requester_auth_payload_and_unknown) ... ok
 test_ticket_rules_no_per_message_creation (test_demo.DemoTests.test_ticket_rules_no_per_message_creation) ... ok
+test_uncertain_ai_plan_still_sends_honest_reply (test_demo.DemoTests.test_uncertain_ai_plan_still_sends_honest_reply) ... ok
 test_unknown_source_allowlist_and_identity_isolation (test_demo.DemoTests.test_unknown_source_allowlist_and_identity_isolation) ... ok
 test_unselected_customers_never_persist_or_enqueue_even_with_same_marker (test_demo.DemoTests.test_unselected_customers_never_persist_or_enqueue_even_with_same_marker) ... ok
 test_video_signed_url_auth_scope_and_expiry (test_demo.DemoTests.test_video_signed_url_auth_scope_and_expiry) ... ok
@@ -81,6 +83,6 @@ test_webhook_atomic_persist_failure (test_demo.DemoTests.test_webhook_atomic_per
 test_wrong_channel_cannot_send_and_not_support_false_switch (test_demo.DemoTests.test_wrong_channel_cannot_send_and_not_support_false_switch) ... ok
 
 ----------------------------------------------------------------------
-Ran 81 tests in 13.108s
+Ran 83 tests in 14.984s
 
 OK

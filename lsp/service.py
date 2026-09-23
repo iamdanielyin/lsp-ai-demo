@@ -655,13 +655,13 @@ class Service:
             c = self.conv(cid)
             self.assert_current(job, c)
             self.validate_plan(plan, c, job["origin"] == "ai")
+            if plan["needs_human"] and not plan["messages"]:
+                plan["messages"] = [{"type": "text", "text": "我目前無法確認這個問題的答案，請補充相關資訊，或由人工客服協助確認。", "asset_id": None}]
             self.db.log(c["tenant"], cid, "plan_validated", f"{len(plan['messages'])} 条独立回复")
             if job["origin"] == "ai":
                 for i, m in enumerate(plan["messages"]):
                     self.enqueue("send", c, m, origin="ai", trigger=job["trigger_id"], batch=job["id"], seq=i)
-                if plan["needs_human"]:
-                    # Hand off immediately: suggested messages remain visible in the preview, never fight a human agent.
-                    self.set_mode(cid, "manual")
+                # A model suggestion does not cancel its answer; operators still control handoff.
                 if plan["ticket_reason"] and s["ticket_policy"] == "automatic" and plan["ticket_reason"] in s["ticket_allowed_reasons"]:
                     try:
                         self.create_ticket(cid, plan["ticket_reason"], automatic=True)

@@ -116,7 +116,7 @@ tenant指纹由平台地址和Token计算；轮换平台凭证也要求重新导
 | `POST /api/conversations/{id}/sync` | 排队全量补齐可访问历史 |
 | `POST /api/conversations/{id}/messages` | messages数组及confirm_send=true；文本/素材版本计划，返回独立任务ID |
 | `PUT /api/conversations/{id}/mode` | mode=manual/auto/off；自动模式仍检查当前授权 |
-| `POST /api/conversations/{id}/ai-preview` | 排队真实生成，保存计划但不发送 |
+| `POST /api/conversations/{id}/ai-preview` | 兼容旧接口；正常消息流程不需要预览，开启 AI 后直接生成并发送 |
 | `POST /api/conversations/{id}/ticket` | reason及new_matter；创建或复用事项工单任务 |
 | `GET /api/jobs/{job_id}` | 当前租户脱敏任务状态、计划、错误和结果 |
 | `POST /api/jobs/{job_id}/resolve` | action=cancel/retry/link_existing，要求核实证据；retry需ack_duplicate_risk |
