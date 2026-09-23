@@ -218,7 +218,8 @@
     "checks": [
       "two column chat with hidden details",
       "direct text send and Shift Enter newline",
-      "text/image/PDF sent in sequence with accepted task states",
+      "text plus image/video and PDF sent in sequence with accepted task states",
+      "composer uses direct text input, combined image/video picker, single PDF attachment picker, and no chat asset-library button",
       "MP4 upload preview and accepted send task",
       "manual send turns off conversation AI",
       "manual attachments excluded from shared library and model catalog",

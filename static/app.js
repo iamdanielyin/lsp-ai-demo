@@ -267,28 +267,32 @@ function emptyConversation() {
 }
 function threadHeader() {const c=S.detail.conversation;return `<div class="thread-head"><button id="back-to-list" class="ghost small" aria-label="返回会话列表">‹</button><div class="chat-identity"><h3>${esc('客户 · '+(c.user_id||c.platform_id).slice(-8))}</h3><small>${esc(c.channel==='unknown'?'来源待确认':c.channel)} · <span id="chat-mode"></span></small></div><div class="actions"><button id="toggle-ai" class="small" role="switch" aria-label="AI 自动回复" aria-checked="false"></button><button id="show-details" class="ghost small" aria-expanded="false" aria-controls="inspector">详情</button></div></div><div id="thread-meta" class="thread-meta"></div>`;}
 function renderThread() {
-  $('#message-pane').innerHTML=`${threadHeader()}<div id="thread" class="thread" role="log" aria-label="聊天记录"></div><div class="composer"><div id="draft-list" class="draft-list"></div><textarea id="message-text" aria-label="回复文本" placeholder="输入消息…" rows="3"></textarea><div class="composer-footer"><div class="actions composer-tools"><button id="add-text" class="ghost small" title="输入文本">文本</button>${[['image','图片','.jpg,.jpeg,.png'],['file','文件','.pdf'],['video','视频','.mp4']].map(([kind,name,accept])=>`<button type="button" class="ghost small pick-attachment" data-kind="${kind}" title="${accept}">${name}</button><input type="file" id="attach-${kind}" data-kind="${kind}" accept="${accept}" hidden>`).join('')}<button id="choose-asset" class="ghost small">素材库</button></div><button id="send-message" class="primary">发送</button></div><div class="composer-hint"><small id="composer-status" role="status">Enter 发送 · Shift + Enter 换行</small><small>手动发送后关闭本会话 AI</small></div></div>`;
+  $('#message-pane').innerHTML=`${threadHeader()}<div id="thread" class="thread" role="log" aria-label="聊天记录"></div><div class="composer"><div id="draft-list" class="draft-list"></div><textarea id="message-text" aria-label="回复文本" placeholder="输入消息…" rows="3"></textarea><div class="composer-footer"><div class="actions composer-tools"><button type="button" class="ghost small pick-attachment" data-kind="media" title="JPEG、PNG 或 MP4">图片/视频</button><input type="file" id="attach-media" data-kind="media" accept="image/jpeg,image/png,video/mp4,.jpg,.jpeg,.png,.mp4" multiple hidden><button type="button" class="ghost small pick-attachment" data-kind="file" title="PDF 附件">附件</button><input type="file" id="attach-file" data-kind="file" accept="application/pdf,.pdf" hidden></div><button id="send-message" class="primary">发送</button></div><div class="composer-hint"><small id="composer-status" role="status">Enter 发送 · Shift + Enter 换行</small><small>手动发送后关闭本会话 AI</small></div></div>`;
   buttonAction($('#back-to-list'),()=>{$('.im-grid').classList.remove('chat-open');$('#inspector').hidden=true;});
   buttonAction($('#show-details'),()=>{const open=$('#inspector').hidden;$('#inspector').hidden=!open;$('#show-details').setAttribute('aria-expanded',String(open));if(open)$('#close-inspector').focus();});
   buttonAction($('#toggle-ai'),async()=>{const c=S.detail.conversation;const result=await api('/api/conversations/'+c.id+'/mode',{method:'PUT',body:{mode:c.mode==='auto'?'manual':'auto'}});toast(result.message);await refreshConversations();});
-  buttonAction($('#add-text'),()=>$('#message-text').focus());
   $$('.pick-attachment').forEach(b=>buttonAction(b,()=>$('#attach-'+b.dataset.kind).click()));
   $$('input[type=file]',$('.composer')).forEach(input=>bind(input,'change',()=>uploadAttachment(input)));
-  buttonAction($('#choose-asset'),chooseAsset);
   buttonAction($('#send-message'),sendMessages);
   bind($('#message-text'),'keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&e.keyCode!==229){e.preventDefault();$('#send-message').click();}});
   updateThread(true);renderDrafts();
 }
 async function uploadAttachment(input) {
-  const file=input.files[0];input.value='';if(!file||S.uploading||S.sending)return;
-  const cid=S.selected;S.uploading=true;$$('.pick-attachment,#choose-asset,#send-message').forEach(el=>el.disabled=true);$('#composer-status').textContent='正在上传 '+file.name+'…';
+  const files=[...input.files];input.value='';if(!files.length||S.uploading||S.sending)return;
+  const cid=S.selected;S.uploading=true;$$('.pick-attachment,#send-message').forEach(el=>el.disabled=true);
   try {
-    const form=new FormData();form.append('file',file);form.append('type',input.dataset.kind);
-    const a=await api('/api/conversations/'+cid+'/attachments',{method:'POST',body:form});
-    if(a.state!=='sendable')throw new Error('附件正在安全扫描，暂不可发送，请稍后重新上传。');
-    if(S.page!=='conversations'||S.selected!==cid)return;
-    S.assets.push(a);S.drafts.push({type:a.kind,text:null,asset_id:a.id});renderDrafts();
-  } finally {S.uploading=false;$$('.pick-attachment,#choose-asset,#send-message').forEach(el=>el.disabled=S.sending);if($('#composer-status'))$('#composer-status').textContent='Enter 发送 · Shift + Enter 换行';}
+    for(const file of files){
+      $('#composer-status').textContent='正在上传 '+file.name+'…';
+      const mime=file.type.toLowerCase(),ext=file.name.toLowerCase().split('.').pop();
+      const type=mime==='image/jpeg'||mime==='image/png'||['jpg','jpeg','png'].includes(ext)?'image':mime==='video/mp4'||ext==='mp4'?'video':mime==='application/pdf'||ext==='pdf'?'file':null;
+      if(!type)throw new Error('仅支持 JPEG、PNG、MP4 或 PDF 附件。');
+      const form=new FormData();form.append('file',file);form.append('type',type);
+      const a=await api('/api/conversations/'+cid+'/attachments',{method:'POST',body:form});
+      if(a.state!=='sendable')throw new Error('附件正在安全扫描，暂不可发送，请稍后重新上传。');
+      if(S.page!=='conversations'||S.selected!==cid)return;
+      S.assets.push(a);S.drafts.push({type:a.kind,text:null,asset_id:a.id});renderDrafts();
+    }
+  } finally {S.uploading=false;$$('.pick-attachment,#send-message').forEach(el=>el.disabled=S.sending);if($('#composer-status'))$('#composer-status').textContent='Enter 发送 · Shift + Enter 换行';}
 }
 function messageHTML(m) {
   return `<article class="message ${esc(m.role)}" title="消息 ID：${esc(m.platform_id)}"><div class="message-meta"><strong>${roleNames[m.role]||m.actor}</strong><span>${fmtTime(m.created)}</span></div><div class="bubble">${m.parts.map(p=>{
@@ -315,12 +319,6 @@ function renderDrafts() {
   const root=$('#draft-list');if(!root)return;
   root.innerHTML=S.drafts.map((m,i)=>{const a=S.assets.find(a=>a.id===m.asset_id);return `<div class="draft-row">${a?.kind==='image'?`<img src="${esc(a.preview_url)}" alt="${esc(a.name)}">`:a?.kind==='video'?`<video src="${esc(a.preview_url)}" controls preload="metadata"></video>`:''}<span>${labels[m.type]} · ${esc(a?.name||m.asset_id)}</span><button class="ghost small remove-draft" data-index="${i}" aria-label="移除第${i+1}个附件">✕</button></div>`;}).join('');
   $$('.remove-draft').forEach(b=>buttonAction(b,()=>{S.drafts.splice(Number(b.dataset.index),1);renderDrafts();}));
-}
-async function chooseAsset() {
-  if(S.uploading||S.sending)return;
-  const shared=(await api('/api/assets')).assets;S.assets=[...new Map([...S.assets,...shared].map(a=>[a.id,a])).values()];const assets=shared.filter(a=>a.enabled&&a.state==='sendable'&&a.channels.includes(S.detail.conversation.channel));
-  modal('选择已审核素材',assets.length?`<div class="asset-picker">${assets.map(a=>`<button type="button" class="asset-choice" data-id="${esc(a.id)}"><span><strong>${esc(a.name)}</strong><small>${esc(a.purpose)}</small><small>${esc(a.id)} · ${bytes(a.size)}</small></span>${pill('',labels[a.kind])}</button>`).join('')}</div>`:'<p class="muted">当前渠道没有可发送且启用的素材。请在设置页上传并确认扫描状态及渠道授权。</p>',null);
-  $$('.asset-choice').forEach(b=>buttonAction(b,()=>{const a=assets.find(x=>x.id===b.dataset.id);S.drafts.push({type:a.kind,text:null,asset_id:a.id});renderDrafts();$('#dialog').close();}));
 }
 async function sendMessages() {
   if(S.uploading||S.sending)return;
