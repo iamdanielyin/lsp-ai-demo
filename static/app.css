@@ -1387,9 +1387,11 @@ dialog::backdrop {
 .im-grid #back-to-list {display:none;font-size:25px}
 .im-grid .thread-meta {flex-shrink:0}
 .im-grid .thread {flex:1;min-height:0;height:auto;background:#f7f9f6;padding:24px;overscroll-behavior:contain}
-.im-grid .message {max-width:78%}
+.im-grid .message {width:fit-content;max-width:78%;margin-left:0;margin-right:auto}
+.im-grid .message.system,.im-grid .message.private {width:100%;max-width:100%}
+.im-grid .message.agent,.im-grid .message.ai {margin-left:auto;margin-right:0}
 .im-grid .bubble {background:white;border:1px solid #e8ede6;border-radius:12px;line-height:1.65}
-.im-grid .agent .bubble,.im-grid .ai .bubble {background:#e6f1e9;border-color:#dfebe1}
+.im-grid .agent .bubble,.im-grid .ai .bubble {background:#fff3b8;border-color:#e4cc68;color:#111}
 .im-grid .message-meta {font-size:11px}
 .im-grid .composer {margin:0;flex-shrink:0;padding:16px 22px 12px;background:white}
 .im-grid .composer textarea {min-height:64px;max-height:120px;resize:none;font-size:14px}
