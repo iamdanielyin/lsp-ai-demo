@@ -115,12 +115,14 @@ class Service:
     def add_conversation(self, platform_id, user_id="", source="", topic=""):
         s, _ = self.settings.get()
         tenant = tenant_id(s)
+        # 新流程默认人工；保留旧的“测试账号绑定”启动路径，避免已有测试数据改变行为。
         binding = self.discovery()["bindings"].get(s["source_mapping"].get(source))
-        auto = s["auto_reply_enabled"] and not self.auto_scope_allowed(s) and not (binding and binding["user_id"] == user_id and binding["paused"])
+        legacy_auto = bool(s["auto_reply_enabled"] and s["test_identity_allowlist"]
+                           and not (binding and binding["user_id"] == user_id and binding["paused"]))
         boundary = self.db.one("SELECT value FROM meta WHERE key='auto_since'")
         self.db.run("INSERT OR IGNORE INTO conversations(tenant,platform_id,user_id,source,channel,topic_id,mode,auto_since,updated) VALUES(?,?,?,?,?,?,?,?,?)",
                     (tenant, identifier(platform_id), user_id, source, s["source_mapping"].get(source, "unknown"), topic,
-                     "auto" if auto else "off", boundary["value"] if auto and boundary else "", time.time()))
+                     "auto" if legacy_auto else "off", boundary["value"] if legacy_auto and boundary else "", time.time()))
         c = self.db.one("SELECT * FROM conversations WHERE tenant=? AND platform_id=?", (tenant, platform_id))
         return c
 
@@ -160,14 +162,15 @@ class Service:
         require(mode in ("auto", "manual", "off"), "invalid_mode", "会话模式不正确")
         with self.db.lock:
             c = self.conv(cid)
-            s, rev = self.settings.get()
+            s, _ = self.settings.get()
             if mode == "auto":
-                self.send_guard(c, s)
-                require(c["sync_complete"] and not c["sync_error"], "history_not_ready", "请等待当前会话历史同步完成后恢复 AI", 409)
-                self.settings.auto_ready(s, rev, c["channel"])
+                self.send_guard(c, s, automatic=True)
+                require(c["sync_complete"] and not c["sync_error"], "history_not_ready", "请先同步当前会话历史", 409)
+                require(s["openai_api_key"] and s["openai_model"], "ai_not_configured", "请先配置 OpenAI API Key 和模型", 409)
             self.cancel_ai(cid, "人工接管或会话模式已变化，未发送任务已取消")
             state = self.discovery()
             binding = state["bindings"].get(c["channel"])
+            # 只为旧的测试账号绑定保留渠道级暂停；普通会话始终是单会话开关。
             if binding and binding["user_id"] == c["user_id"]:
                 binding["paused"] = mode != "auto"
                 self.save_discovery(state)
@@ -176,9 +179,7 @@ class Service:
                 self.db.run("UPDATE conversations SET mode=?,auto_since=?,updated=? WHERE tenant=? AND user_id=? AND channel=?", (mode, utc(), time.time(), c["tenant"], c["user_id"], c["channel"]))
             self.db.run("UPDATE conversations SET mode=?,auto_since=?,updated=? WHERE id=?", (mode, utc(), time.time(), cid))
             inflight = self.db.one("SELECT count(*) AS n FROM jobs WHERE conversation=? AND state='sending'", (cid,))["n"]
-            if binding and binding["user_id"] == c["user_id"]:
-                inflight = self.db.one("SELECT count(*) n FROM jobs WHERE state='sending' AND conversation IN (SELECT id FROM conversations WHERE tenant=? AND user_id=? AND channel=?)", (c["tenant"], c["user_id"], c["channel"]))["n"]
-            return {"mode": mode, "inflight": inflight, "message": f"已取消待发送 AI 任务；另有 {inflight} 条已提交请求，无法撤回"}
+            return {"mode": mode, "inflight": inflight, "message": ("本会话 AI 已开启" if mode == "auto" else "本会话已关闭 AI，当前仅人工回复") + f"；已取消待发送任务，另有 {inflight} 条已提交请求无法撤回"}
 
     def ingest(self, payload, version, retries):
         require(isinstance(payload, dict), "event_format", "Webhook 须为 JSON 对象")
@@ -241,8 +242,7 @@ class Service:
                     self.cancel_ai(c["id"], "客户追加消息，旧计划已取消")
                 if c["mode"] == "auto" and m["created"] > c["auto_since"] and c["last_customer"] == m["platform_id"]:
                     try:
-                        self.send_guard(c, s)
-                        self.settings.auto_ready(s, rev, c["channel"])
+                        self.send_guard(c, s, automatic=True)
                         self.enqueue("generate", c, origin="ai", trigger=c["last_customer"], due=time.time() + s["debounce_ms"] / 1000)
                     except Problem as e:
                         self.db.log(c["tenant"], c["id"], "auto_blocked", e.message)
@@ -534,15 +534,19 @@ class Service:
             self.db.log(c["tenant"], cid, "history_failed", e.message)
             raise
 
-    def send_guard(self, c, s):
+    def send_guard(self, c, s, automatic=False):
         require(c["tenant"] == tenant_id(s), "tenant_changed", "当前租户已变化", 409)
         require(s["reply_actor_id"] and s["freshchat_token"] and s["platform_api_base_url"], "send_not_configured", "平台发送配置不完整", 409)
-        require(not self.auto_scope_allowed(s) or not c.get("assigned_agent_id") or c["assigned_agent_id"] == s["reply_actor_id"],
-                "outside_selected_agent", "会话已分配给其他坐席", 409)
-        require(self.quick_scope(c["user_id"], c["source"]), "identity_denied", "该账号未绑定当前测试渠道", 403)
-        require(c["channel"] != "unknown" and c["channel"] in s["allowed_channels"], "channel_denied", "当前来源未映射或渠道未列入白名单", 409)
-        require(test_identity_allowed(s, c["platform_id"], c["user_id"]) or self.auto_scope_allowed(s),
-                "identity_denied", "当前客户或会话未列入测试白名单", 403)
+        # 白名单是可选的兼容限制；未配置时，会话页已选中的本租户会话即可发送。
+        if s["test_identity_allowlist"]:
+            require(test_identity_allowed(s, c["platform_id"], c["user_id"]),
+                    "identity_denied", "当前客户或会话未列入测试白名单", 403)
+            require(c["channel"] != "unknown", "channel_denied", "当前来源未映射，请在消息页核对真实渠道", 409)
+        if c["channel"] != "unknown" and s["allowed_channels"]:
+            require(c["channel"] in s["allowed_channels"], "channel_denied", "当前渠道未列入允许渠道", 409)
+        if automatic:
+            require(not c.get("assigned_agent_id") or c["assigned_agent_id"] == s["reply_actor_id"],
+                    "outside_selected_agent", "会话已分配给其他坐席", 409)
 
     def asset(self, aid):
         require(isinstance(aid, str) and 0 < len(aid) <= 260, "invalid_asset_id", "素材 ID 格式不正确")
@@ -671,8 +675,8 @@ class Service:
         state = self.db.one("SELECT state FROM jobs WHERE id=?", (job["id"],))["state"]
         require(state != "cancelled" and rev == job["revision"] and c["tenant"] == tenant_id(s), "stale_plan", "配置或任务状态已变化，旧计划已取消", 409)
         if job["origin"] == "ai":
-            self.send_guard(c, s)
-            self.settings.auto_ready(s, rev, c["channel"])
+            self.send_guard(c, s, automatic=True)
+            require(s["openai_api_key"] and s["openai_model"], "ai_not_configured", "OpenAI 配置已不完整", 409)
             require(c["mode"] == "auto" and c["last_customer"] == job["trigger_id"], "stale_plan", "客户追加消息或人工接管，旧计划已取消", 409)
 
     def submit(self, job):
@@ -680,7 +684,7 @@ class Service:
             c = self.conv(job["conversation"])
             self.assert_current(job, c)
             s, _ = self.settings.get()
-            self.send_guard(c, s)
+            self.send_guard(c, s, automatic=job["origin"] == "ai")
             message = self.db.unseal(job["payload"])
             self.validate_plan({"messages": [message], "needs_human": False, "ticket_reason": None}, c, job["origin"] == "ai")
             a = self.asset(message["asset_id"]) if message["asset_id"] else None

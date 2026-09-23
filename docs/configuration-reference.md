@@ -60,7 +60,7 @@ Freshchat请求应包含 `X-Freshchat-Signature`；程序记录 `X-Freshchat-Pay
 
 | 参数 | 默认 / 范围 | 填写说明 |
 | --- | --- | --- |
-| `auto_reply_enabled` | `false` | 兼容旧流程的全局开关。自动发现模式保持false，由会话页的“恢复 AI / 人工接管”独立控制，保存坐席会退出旧全局流程 |
+| `auto_reply_enabled` | `false` | 兼容旧流程的全局开关。自动发现模式保持false，由会话页的“开启 AI / 人工接管”独立控制，保存坐席会退出旧全局流程 |
 | `debounce_ms` | `1500`；0–10000毫秒 | 短时间追加消息合并；新消息取消未发旧计划 |
 | `max_reply_messages` | `3`；1–10条 | 单个模型计划和手工提交的服务器条数上限；独立任务逐条发送 |
 | `ai_requests_per_minute` | `10`；1–120次 | Demo本地限额，非供应商额度；检查、预览和自动生成均占用预算 |
