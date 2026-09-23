@@ -114,7 +114,8 @@ tenant指纹由平台地址和Token计算；轮换平台凭证也要求重新导
 | `POST /api/conversations/{id}/test-access` | 旧手动授权channel、scope；scope=customer会替换整个范围，不能用来追加双渠道测试 |
 | `GET /api/conversations/{id}/messages` | before偏移、limit最多100；返回时间范围、同步状态、任务/工单/日志 |
 | `POST /api/conversations/{id}/sync` | 排队全量补齐可访问历史 |
-| `POST /api/conversations/{id}/messages` | messages数组及confirm_send=true；文本/素材版本计划，返回独立任务ID |
+| `POST /api/conversations/{id}/messages` | IM发送按钮提交messages及confirm_send=true；返回逐条任务ID |
+| `POST /api/conversations/{id}/attachments` | 管理员multipart上传file及type=image/file/video；自动准备引用，返回附件状态；仅限本会话人工发送 |
 | `PUT /api/conversations/{id}/mode` | mode=manual/auto/off；自动模式仍检查当前授权 |
 | `POST /api/conversations/{id}/ai-preview` | 兼容旧接口；正常消息流程不需要预览，开启 AI 后直接生成并发送 |
 | `POST /api/conversations/{id}/ticket` | reason及new_matter；创建或复用事项工单任务 |
@@ -138,3 +139,5 @@ Freshchat：`GET /v2/agents`、`GET /v2/conversations/{platform_id}`、`GET .../
 Freshdesk：Basic `<API_KEY>:X`，跟进建单 `POST /api/v2/tickets`，读真实Ticket用于核实关联；不包含新版Omni公开会话回复适配。OpenAI：配置地址的Responses端点、Bearer、可选Project/Organization Header、严格schema及store=false。
 
 具体契约、官方依据与未实测点见 [API依据](api-evidence.md)。这些路径在代码中存在不等于实际租户或连接器已支持。
+
+IM 手动附件复用素材存储和平台上传校验，`assets.conversation` 自动迁移为可空会话引用。共享审核素材为 NULL；会话附件从共享列表及模型目录排除，发送时再检查绑定会话与人工来源。

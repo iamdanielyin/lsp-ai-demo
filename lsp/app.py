@@ -194,7 +194,7 @@ def create_app(config=None, start_worker=True):
         tenant = tenant_id(s)
         return jsonify(route="freshchat", tenant_verified=False, revision=revision, auto_reply_enabled=s["auto_reply_enabled"],
                        conversations=db.one("SELECT count(*) AS n FROM conversations WHERE tenant=?", (tenant,))["n"],
-                       assets=db.one("SELECT count(*) AS n FROM assets WHERE tenant=? AND state='sendable' AND enabled=1", (tenant,))["n"],
+                       assets=db.one("SELECT count(*) AS n FROM assets WHERE tenant=? AND conversation IS NULL AND state='sendable' AND enabled=1", (tenant,))["n"],
                        pending=db.one("SELECT count(*) AS n FROM jobs WHERE tenant=? AND state IN ('queued','pending','generating','sending')", (tenant,))["n"],
                        attention=db.one("SELECT count(*) AS n FROM jobs WHERE tenant=? AND state IN ('failed','unknown','paused')", (tenant,))["n"])
 
@@ -358,6 +358,12 @@ def create_app(config=None, start_worker=True):
     def mode(cid):
         return jsonify(service.set_mode(cid, body().get("mode")))
 
+    @app.post("/api/conversations/<int:cid>/attachments")
+    def attachment(cid):
+        file = request.files.get("file")
+        require(file and file.filename, "file_missing", "请选择图片、文件或视频")
+        return jsonify(service.save_attachment(cid, file.read(25_000_001), file.filename, file.mimetype, request.form.get("type"))), 201
+
     @app.post("/api/conversations/<int:cid>/ai-preview")
     def preview(cid):
         return jsonify(service.preview(cid))
@@ -380,7 +386,7 @@ def create_app(config=None, start_worker=True):
     def assets():
         if request.method == "GET":
             s, _ = service.settings.get()
-            return jsonify(assets=[service.public_asset(service.asset(a["id"])) for a in db.all("SELECT id FROM assets WHERE tenant=? ORDER BY created DESC", (tenant_id(s),))])
+            return jsonify(assets=[service.public_asset(service.asset(a["id"])) for a in db.all("SELECT id FROM assets WHERE tenant=? AND conversation IS NULL ORDER BY created DESC", (tenant_id(s),))])
         if request.is_json:
             return jsonify(service.remote_asset(body())), 201
         file = request.files.get("file")

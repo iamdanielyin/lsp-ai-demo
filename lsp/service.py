@@ -569,6 +569,7 @@ class Service:
             else:
                 require(m["text"] is None and isinstance(m["asset_id"], str), "invalid_plan", "媒体需指定审核素材 ID，text 为 null")
                 a = self.asset(m["asset_id"])
+                require(a["conversation"] is None or (not automatic and a["conversation"] == c["id"]), "attachment_scope", "该附件仅可在上传时的会话中由人工发送", 403)
                 require(a["kind"] == m["type"] and a["state"] == "sendable" and a["enabled"] and a["ref"] and c["channel"] in a["channels"], "asset_not_sendable", "素材类型、版本、可发送状态或渠道授权不符合要求")
                 require(a["size"] <= s["media_size_limits"][a["kind"]] and a["mime"] in s["allowed_mime_types"], "asset_limit", "素材超出当前媒体限制")
                 if automatic:
@@ -641,7 +642,7 @@ class Service:
             history.append({"id": row["platform_id"], "actor": row["actor"], "time": row["created"], "parts": visible})
         require(history, "history_empty", "会话没有可提供给模型的公开客户历史", 409)
         assets = []
-        for a in self.db.all("SELECT id,kind,name,purpose,tags,channels FROM assets WHERE tenant=? AND state='sendable' AND enabled=1", (c["tenant"],)):
+        for a in self.db.all("SELECT id,kind,name,purpose,tags,channels FROM assets WHERE tenant=? AND conversation IS NULL AND state='sendable' AND enabled=1", (c["tenant"],)):
             if c["channel"] in json.loads(a["channels"]) and (job["origin"] != "ai" or self.settings.passed(c["channel"], a["kind"])):
                 assets.append({"asset_id": a["id"], "type": a["kind"], "name": a["name"], "purpose": a["purpose"], "tags": json.loads(a["tags"])})
         payload, context = providers.response_payload(s, history, assets)
@@ -778,7 +779,19 @@ class Service:
             self.db.run("UPDATE jobs SET state='paused',error='同一计划前一条失败或结果不明，需人工处理',updated=? WHERE batch=? AND seq>? AND state IN ('pending','queued')", (time.time(), job["batch"], job["seq"]))
         self.db.log(job["tenant"], job["conversation"], "job_" + state, error.message)
 
-    def save_asset(self, metadata, data, filename, claimed_mime="", remote_url=""):
+    def save_attachment(self, cid, data, filename, claimed_mime, kind):
+        with self.db.lock:
+            c = self.conv(cid)
+            s, _ = self.settings.get()
+            self.send_guard(c, s)
+            actual, _ = security.detect_file(filename, data, claimed_mime)
+            require(kind in ("image", "video", "file") and kind == actual, "attachment_type", "文件内容与所选图片、文件或视频类型不符")
+            metadata = {"asset_id": "attachment_" + uuid.uuid4().hex, "name": Path(filename).name[:200],
+                        "purpose": "仅供本会话人工回复", "channels": [c["channel"]]}
+            asset = self.save_asset(metadata, data, filename, claimed_mime, conversation=c)
+        return asset if asset["state"] == "sendable" else self.upload_asset(asset["id"])
+
+    def save_asset(self, metadata, data, filename, claimed_mime="", remote_url="", conversation=None):
         s, _ = self.settings.get()
         require(isinstance(metadata, dict), "asset_format", "素材信息须为对象")
         logical = identifier(metadata.get("asset_id"))
@@ -786,7 +799,8 @@ class Service:
         require(isinstance(name, str) and 0 < len(name) <= 200 and isinstance(purpose, str) and 0 < len(purpose) <= 2000,
                 "asset_metadata", "素材名称和用途必填，长度分别不超过200和2000字符")
         channels, tags = metadata.get("channels", []), metadata.get("tags", [])
-        require(isinstance(channels, list) and channels and all(isinstance(x, str) and x in s["allowed_channels"] for x in channels), "asset_channels", "素材至少选择一个已允许的真实渠道")
+        allowed_channels = [conversation["channel"]] if conversation else s["allowed_channels"]
+        require(isinstance(channels, list) and channels and all(isinstance(x, str) and x in allowed_channels for x in channels), "asset_channels", "素材至少选择一个已允许的真实渠道")
         require(isinstance(tags, list) and len(tags) <= 20 and all(isinstance(x, str) and len(x) <= 80 for x in tags), "asset_tags", "素材标签格式不正确")
         kind, mime = security.detect_file(filename, data, claimed_mime)
         require(mime in s["allowed_mime_types"] and len(data) <= s["media_size_limits"][kind], "asset_limit", "文件超过对应媒体大小限制或 MIME 未获允许")
@@ -800,8 +814,8 @@ class Service:
             state = "sendable" if kind == "video" and s["public_base_url"] else "pending_upload"
             # Send the reviewed bytes, including remote downloads, through a version-bound signed URL.
             ref = {"local_video": True} if kind == "video" and s["public_base_url"] else None
-            self.db.run("INSERT INTO assets(id,tenant,logical_id,version,kind,name,purpose,tags,filename,mime,size,path,remote_url,ref,state,channels,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                        (aid, tenant_id(s), logical, version, kind, name, purpose, dump(tags), Path(filename).name[:200], mime, len(data), str(path), remote_url, self.db.seal(ref) if ref else None, state, dump(channels), time.time()))
+            self.db.run("INSERT INTO assets(id,tenant,logical_id,version,kind,name,purpose,tags,filename,mime,size,path,remote_url,ref,state,channels,created,conversation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (aid, tenant_id(s), logical, version, kind, name, purpose, dump(tags), Path(filename).name[:200], mime, len(data), str(path), remote_url, self.db.seal(ref) if ref else None, state, dump(channels), time.time(), conversation["id"] if conversation else None))
         return self.public_asset(self.asset(aid))
 
     def remote_asset(self, metadata):

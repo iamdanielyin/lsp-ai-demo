@@ -22,7 +22,7 @@ if __name__=='__main__':
                            'reply_actor_id':'LOCAL_TEST_AGENT','source_mapping':{'web':'Webchat'},'allowed_channels':['Webchat'],
                            'test_identity_allowlist':['user:LOCAL_TEST_CUSTOMER'],'requester_mapping':{'LOCAL_TEST_CUSTOMER':42},
                            'freshdesk_domain':'https://browser-test.freshdesk.com','freshdesk_api_key':'LOCAL-TEST-NOT-A-CREDENTIAL',
-                           'openai_model':'LOCAL_TEST_STUB','openai_api_key':'LOCAL-TEST-NOT-A-CREDENTIAL',
+                           'public_base_url':'https://local-test.example','openai_model':'LOCAL_TEST_STUB','openai_api_key':'LOCAL-TEST-NOT-A-CREDENTIAL',
                            'knowledge_text':'本服务器仅用于本地 UI 测试。所有会话、模型响应和工单为合成数据，不能用作真实验收。'})
         c=svc.add_conversation('LOCAL_TEST_CONVERSATION','LOCAL_TEST_CUSTOMER','web')
         rows=[]
@@ -48,7 +48,7 @@ if __name__=='__main__':
         def model(settings,payload):
             plan={'messages':[{'type':'text','text':'这是本地 UI 测试模型替身的回复，不代表 OpenAI 已验收。','asset_id':None}], 'needs_human':False,'ticket_reason':'本地测试跟进'}
             return {'id':'LOCAL_TEST_RESPONSE','status':'completed','output':[{'type':'message','content':[{'type':'output_text','text':json.dumps(plan)}]}],'usage':{'input_tokens':100,'output_tokens':30,'total_tokens':130}},'LOCAL_TEST_REQUEST'
-        with patch('lsp.providers.agents',return_value=[{'id':'LOCAL_TEST_AGENT','name':'本地测试坐席'}]),patch('lsp.providers.conversation',return_value={'conversation_id':c['platform_id']}),patch('lsp.providers.history_pages',side_effect=lambda *args:iter([rows.copy()])),patch('lsp.providers.send_message',side_effect=send),patch('lsp.providers.openai',side_effect=model),patch('lsp.providers.freshdesk',return_value={'id':999,'status':2}):
+        with patch('lsp.providers.agents',return_value=[{'id':'LOCAL_TEST_AGENT','name':'本地测试坐席'}]),patch('lsp.providers.conversation',return_value={'conversation_id':c['platform_id']}),patch('lsp.providers.history_pages',side_effect=lambda *args:iter([rows.copy()])),patch('lsp.providers.upload',side_effect=lambda s,a,data: ({'url':'https://local-test.example/image.png'} if a['kind']=='image' else {'file_hash':'LOCAL_TEST_HASH','file_security_status':'SAFE_FILE'},'sendable')),patch('lsp.providers.send_message',side_effect=send),patch('lsp.providers.openai',side_effect=model),patch('lsp.providers.freshdesk',return_value={'id':999,'status':2}):
             svc.start()
             print('LOCAL SYNTHETIC UI TEST ONLY http://127.0.0.1:8128 — password: LOCAL-BROWSER-TEST-ONLY',flush=True)
             serve(app,host='127.0.0.1',port=8128,threads=4)

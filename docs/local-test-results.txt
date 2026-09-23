@@ -7,6 +7,9 @@ test_auto_discovery_assignment_roles_and_pause (test_demo.DemoTests.test_auto_di
 test_auto_discovery_resolves_assignment_before_history_and_customer_from_actor (test_demo.DemoTests.test_auto_discovery_resolves_assignment_before_history_and_customer_from_actor) ... ok
 test_auto_discovery_second_channel_does_not_reset_first_conversation (test_demo.DemoTests.test_auto_discovery_second_channel_does_not_reset_first_conversation) ... ok
 test_background_scope_rechecked_and_manual_import_still_works (test_demo.DemoTests.test_background_scope_rechecked_and_manual_import_still_works) ... ok
+test_chat_attachment_upload_scope_and_model_exclusion (test_demo.DemoTests.test_chat_attachment_upload_scope_and_model_exclusion) ... ok
+test_chat_attachment_validation_auth_and_scan (test_demo.DemoTests.test_chat_attachment_validation_auth_and_scan) ... ok
+test_chat_image_and_video_upload_without_library_form (test_demo.DemoTests.test_chat_image_and_video_upload_without_library_form) ... ok
 test_cleanup_preserves_activity_and_unverified (test_demo.DemoTests.test_cleanup_preserves_activity_and_unverified) ... ok
 test_config_change_disables_and_invalidates_and_hides_old_tenant (test_demo.DemoTests.test_config_change_disables_and_invalidates_and_hides_old_tenant) ... ok
 test_context_private_filter_store_false_and_real_preview_no_send (test_demo.DemoTests.test_context_private_filter_store_false_and_real_preview_no_send) ... ok
@@ -83,6 +86,6 @@ test_webhook_atomic_persist_failure (test_demo.DemoTests.test_webhook_atomic_per
 test_wrong_channel_cannot_send_and_not_support_false_switch (test_demo.DemoTests.test_wrong_channel_cannot_send_and_not_support_false_switch) ... ok
 
 ----------------------------------------------------------------------
-Ran 83 tests in 14.984s
+Ran 86 tests in 13.932s
 
 OK

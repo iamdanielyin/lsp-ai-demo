@@ -72,6 +72,8 @@ class Store:
                 db.execute("ALTER TABLE events ADD COLUMN payload TEXT")
             if "assigned_agent_id" not in {r[1] for r in db.execute("PRAGMA table_info(conversations)")}:
                 db.execute("ALTER TABLE conversations ADD COLUMN assigned_agent_id TEXT NOT NULL DEFAULT ''")
+            if "conversation" not in {r[1] for r in db.execute("PRAGMA table_info(assets)")}:
+                db.execute("ALTER TABLE assets ADD COLUMN conversation INTEGER REFERENCES conversations(id)")
         Path(path).chmod(0o600)
 
     @contextmanager

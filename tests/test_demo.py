@@ -1021,6 +1021,44 @@ class DemoTests(unittest.TestCase):
         self.svc.manual_send(self.c['id'],[{'type':'file','text':None,'asset_id':a['id']}])
         self.assertEqual(self.db.unseal(self.db.one("SELECT payload FROM jobs WHERE kind='send'")['payload'])['asset_id'],a['id'])
 
+    def test_chat_attachment_upload_scope_and_model_exclusion(self):
+        with patch('lsp.providers.upload',return_value=({'file_hash':'local-hash'},'sendable')):
+            response=self.client.post('/api/conversations/%s/attachments'%self.c['id'],data={'type':'file','file':(io.BytesIO(b'%PDF-1.7\nlocal test'),'plan.pdf')},headers={'X-CSRF-Token':self.csrf})
+        self.assertEqual(response.status_code,201,response.json)
+        asset=response.json;self.assertEqual(asset['state'],'sendable')
+        self.assertEqual(self.db.one('SELECT conversation FROM assets WHERE id=?',(asset['id'],))['conversation'],self.c['id'])
+        self.assertEqual(self.client.get('/api/assets').json['assets'],[])
+        message={'type':'file','text':None,'asset_id':asset['id']}
+        self.svc.manual_send(self.c['id'],[message])
+        other=self.svc.add_conversation('conv-other','user-1','web')
+        for c,automatic in [(other,False),(self.c,True)]:
+            with self.assertRaises(security.Problem) as error:self.svc.validate_plan({'messages':[message],'needs_human':False,'ticket_reason':None},c,automatic)
+            self.assertEqual(error.exception.code,'attachment_scope')
+        self.enable();self.db.run('UPDATE conversations SET sync_complete=1 WHERE id=?',(self.c['id'],));self.svc.set_mode(self.c['id'],'auto');self.webhook();self.db.run("UPDATE jobs SET state='cancelled' WHERE kind='sync'");self.db.run('UPDATE jobs SET due=0')
+        with patch.object(self.svc,'sync',return_value={}),patch('lsp.providers.openai',return_value=(self.model_response(),'req_attachment')) as model,patch('lsp.providers.send_message',return_value={'id':'reply'}):self.svc.drain()
+        self.assertEqual(json.loads(model.call_args.args[1]['input'])['assets'],[])
+
+    def test_chat_attachment_validation_auth_and_scan(self):
+        url='/api/conversations/%s/attachments'%self.c['id']
+        self.assertEqual(self.app.test_client().post(url).status_code,401)
+        self.assertEqual(self.client.post(url).status_code,403)
+        self.assertEqual(self.call(url).status_code,400)
+        response=self.client.post(url,data={'type':'image','file':(io.BytesIO(b'%PDF-1.7\nlocal test'),'wrong.pdf')},headers={'X-CSRF-Token':self.csrf})
+        self.assertEqual(response.status_code,400);self.assertEqual(response.json['error'],'attachment_type')
+        with patch('lsp.providers.upload',return_value=({'file_hash':'local-hash'},'scanning')):
+            asset=self.svc.save_attachment(self.c['id'],b'%PDF-1.7\nlocal test','scan.pdf','application/pdf','file')
+        self.assertEqual(asset['state'],'scanning')
+        with self.assertRaises(security.Problem):self.svc.manual_send(self.c['id'],[{'type':'file','text':None,'asset_id':asset['id']}])
+        self.assertEqual(self.db.one("SELECT count(*) n FROM jobs WHERE kind='send'")['n'],0)
+
+    def test_chat_image_and_video_upload_without_library_form(self):
+        with patch('lsp.providers.upload',return_value=({'url':'https://media.example/image.png'},'sendable')):
+            image=self.svc.save_attachment(self.c['id'],b'\x89PNG\r\n\x1a\n'+b'x'*30,'map.png','image/png','image')
+        video=self.svc.save_attachment(self.c['id'],b'\x00\x00\x00\x18ftypisom\x00\x00\x00\x00isommp42','guide.mp4','video/mp4','video')
+        self.assertEqual(image['kind'],'image');self.assertEqual(video['kind'],'video')
+        jobs=self.svc.manual_send(self.c['id'],[{'type':a['kind'],'text':None,'asset_id':a['id']} for a in (image,video)])
+        self.assertEqual(len(jobs['job_ids']),2)
+
     def test_file_validation_ssrf_dns_rebinding_and_host_allowlist(self):
         for url in ['http://media.example/x','https://127.0.0.1/x','https://169.254.169.254/x','https://[::1]/x','https://user:pw@media.example/x','https://localhost/x']:
             with self.subTest(url=url),self.assertRaises(security.Problem):security.url_parts(url)

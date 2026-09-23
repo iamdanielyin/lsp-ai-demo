@@ -26,7 +26,7 @@
 
 ## 已完成的本地验证
 
-执行 `.venv/bin/python -m unittest discover -s tests -p 'test_*.py'`：**83 项通过，0 失败，14.984 秒**。完整输出：[local-test-results.txt](local-test-results.txt)。机器可读摘要：[local-evidence.json](local-evidence.json)。Python 编译、JavaScript 语法和 `pip check` 通过。
+执行 `.venv/bin/python -m unittest discover -s tests -p 'test_*.py'`：**86 项通过，0 失败，13.932 秒**。完整输出：[local-test-results.txt](local-test-results.txt)。机器可读摘要：[local-evidence.json](local-evidence.json)。Python 编译、JavaScript 语法和 `pip check` 通过。
 
 测试使用临时数据库、合成 RSA 签名、受控平台/模型响应，并阻止意外真实网络连接。覆盖：
 
@@ -156,3 +156,14 @@
 - 独立8128浏览器验证：新会话默认关闭；一键开启不弹确认、不产生历史补发；下一条消息自动发送并显示2条历史上下文；关闭后新消息不增加AI发送任务；WhatsApp关闭时WeChat独立回复；手动发送后转为人工。所有发送均为本地供应商替身，不是渠道送达证据。
 - 1440×1000桌面和390×844手机实际viewport截图已查看，无横向溢出；控制台和运行时错误为空；模式接口、合成事件和消息接口HTTP200，响应体与任务状态已核对。截图：`local-screenshots/direct-reply-desktop.png`、`local-screenshots/direct-reply-mobile.png`（本机忽略目录）。
 - 正常8127后台已重启，保留本机代理；页面、管理员登录、设置与会话读取正常，敏感字段不返回真实值。重启前无生成中或发送中任务；本次未更改客户配置或开启真实会话AI，未主动调用真实模型或发送客户消息。WhatsApp、WeChat真实闭环仍待测试人员核对。
+
+
+## 普通 IM 界面与会话附件（2026-09-23）
+
+- 两栏聊天布局；主界面移除验证大标题、常驻任务面板和发送确认弹窗；详情保留历史同步、工单、能力证据及任务记录。顶部单会话AI开关、Enter发送、Shift+Enter换行；手机采用列表与聊天切换。
+- 图片、PDF、视频可直接选本地文件，无素材表单。沿用后端文件真实性、大小、扫描和平台上传校验；附件绑定会话，不进入共享库或模型目录，跨会话／自动发送会被拒绝。
+- 86项本地自动化全部通过（13.932秒）。新增验证附件上传鉴权、类型不符、扫描中禁止发送、会话隔离、模型目录排除及图片／视频正常路径。
+- 隔离浏览器已核对文本、文字＋图片＋PDF顺序任务和MP4任务的受理状态，人工发送切换模式，任务滚动保持100像素。桌面1440×1000、手机390×844界面截图已检查，799／801断点宽度已检查；页面与viewport等高，无横向溢出；控制台／运行时错误为空。截图：`local-screenshots/im-desktop.png`、`local-screenshots/im-mobile.png`。
+- 本轮供应商收发均为合成测试，客户原渠道媒体送达仍需真实测试。后台保留真实会话已保存的AI模式，不主动开启或关闭客户会话。
+
+- IM更新后8127后台已重启，附件会话字段迁移完成，管理员会话、设置和素材接口读取正常；既有AI模式保留。

@@ -3,9 +3,9 @@
   "date": "2026-09-23",
   "unit_tests": {
     "command": ".venv/bin/python -m unittest discover -s tests -v",
-    "passed": 83,
+    "passed": 86,
     "failed": 0,
-    "duration_seconds": 14.984
+    "duration_seconds": 13.932
   },
   "syntax": [
     "python compileall passed",
@@ -109,7 +109,8 @@
     "OpenAI address update: normal server restarted; authenticated settings HTTP 200, default URL persisted, auto off, secrets masked",
     "2026-09-21 pairing update: authenticated discovery HTTP 200, no bindings or enrollment; auto off, secret fields masked",
     "2026-09-22: normal 8127 server restarted; authenticated settings masked, auto-discovery active, events list valid, settings and conversations HTTP 200, cpolar URL retained, global AI off",
-    "2026-09-23: 8127 restarted with loopback OpenAI proxy; no generating or sending jobs at restart; pages and authenticated settings/conversations HTTP200; masked secrets; updated JS served"
+    "2026-09-23: 8127 restarted with loopback OpenAI proxy; no generating or sending jobs at restart; pages and authenticated settings/conversations HTTP200; masked secrets; updated JS served",
+    "2026-09-23 IM update: 8127 restarted; attachment conversation column migrated; authenticated conversations/assets/settings returned valid responses; saved AI modes retained"
   ],
   "inbound_isolation": {
     "scope": "legacy_explicit_allowlist_mode_synthetic_signed_events_only",
@@ -210,5 +211,44 @@
     ],
     "real_customer_messages_sent": 0,
     "live_model_calls": 0
+  },
+  "im_conversation_ui": {
+    "date": "2026-09-23",
+    "scope": "local_synthetic_only",
+    "checks": [
+      "two column chat with hidden details",
+      "direct text send and Shift Enter newline",
+      "text/image/PDF sent in sequence with accepted task states",
+      "MP4 upload preview and accepted send task",
+      "manual send turns off conversation AI",
+      "manual attachments excluded from shared library and model catalog",
+      "cross-conversation and AI use rejected",
+      "task scroll preserved after polling",
+      "desktop and mobile viewport height retained; no horizontal overflow",
+      "console and runtime errors empty"
+    ],
+    "viewports": [
+      {
+        "width": 1440,
+        "height": 1000
+      },
+      {
+        "width": 390,
+        "height": 844
+      },
+      {
+        "width": 801,
+        "height": 1000
+      },
+      {
+        "width": 799,
+        "height": 1000
+      }
+    ],
+    "screenshots": [
+      "local-screenshots/im-desktop.png",
+      "local-screenshots/im-mobile.png"
+    ],
+    "real_channel_delivery": "not_tested"
   }
 }
