@@ -318,8 +318,22 @@ function mediaHTML(p) {
   const name=p.name&&p.name!=='媒体'?p.name:'';
   const meta=[name,bytes(p.size)].filter(Boolean).join(' · ');
   if(!p.url)return `<span>${esc(name||labels[p.type]||'附件')} · 暂无可用地址</span>`;
-  if(p.type==='image'||p.type==='video')return `<button type="button" class="chat-media" data-media-type="${p.type}" data-url="${esc(p.url)}" data-name="${esc(name)}" aria-label="放大查看${p.type==='image'?'图片':'视频'}${name?'：'+esc(name):''}">${p.type==='image'?`<img class="media-preview" loading="lazy" src="${esc(p.url)}" alt="${esc(name||'聊天图片')}">`:`<video class="media-preview" muted playsinline preload="metadata" src="${esc(p.url)}"></video><span class="media-play">▶ 播放视频</span>`}</button>${meta?`<small>${esc(meta)}</small>`:''}`;
+  if(p.type==='image'||p.type==='video')return `<button type="button" class="chat-media is-loading" disabled aria-busy="true" data-media-type="${p.type}" data-url="${esc(p.url)}" data-name="${esc(name)}" aria-label="放大查看${p.type==='image'?'图片':'视频'}${name?'：'+esc(name):''}"><span class="media-placeholder" role="status"><span class="media-spinner" aria-hidden="true"></span><span class="media-loading-text">${p.type==='image'?'图片':'视频'}加载中…</span></span>${p.type==='image'?`<img class="media-preview" loading="lazy" src="${esc(p.url)}" alt="${esc(name||'聊天图片')}">`:`<video class="media-preview" muted playsinline preload="metadata" src="${esc(p.url)}"></video><span class="media-play">▶ 播放视频</span>`}</button>${meta?`<small>${esc(meta)}</small>`:''}`;
   return `<a class="attachment" href="${esc(p.url)}" download>↓ ${esc(name||'下载附件')}${bytes(p.size)?' · '+esc(bytes(p.size)):''}</a>`;
+}
+function bindMediaPreviews(root) {
+  $$('.chat-media',root).forEach(button=>{
+    const media=$('.media-preview',button),isImage=media.tagName==='IMG';
+    const settle=failed=>{
+      button.classList.remove('is-loading');button.classList.toggle('is-error',failed);
+      button.disabled=failed;button.setAttribute('aria-busy','false');
+      if(failed){$('.media-loading-text',button).textContent=(isImage?'图片':'视频')+'加载失败';const note=$('.media-fallback',button.closest('.bubble'));if(note)note.classList.remove('hidden');}
+    };
+    media.addEventListener(isImage?'load':'loadeddata',()=>settle(false));
+    media.addEventListener('error',()=>settle(true));
+    if(isImage&&media.complete)settle(!media.naturalWidth);
+    else if(!isImage&&(media.error||media.readyState>=2))settle(Boolean(media.error));
+  });
 }
 function openMedia(button) {
   const type=button.dataset.mediaType,url=button.dataset.url;
@@ -370,7 +384,7 @@ function updateThread(scroll=false) {
   const outgoing=d.jobs.filter(j=>j.kind==='send'&&j.state!=='cancelled'&&!visibleIds.has(j.platform_id)&&(!d.earliest||j.created*1000>=Date.parse(d.earliest))).sort((a,b)=>a.created-b.created||a.seq-b.seq);
   const content=(d.next_before!==null?'<button class="small" id="load-earlier">加载更早消息</button>':'')+d.messages.map(messageHTML).join('')+outgoing.map(j=>{const a=S.assets.find(a=>a.id===j.payload.asset_id);return `<article class="message agent outgoing"><div class="message-meta"><strong>${j.origin==='ai'?'AI 助理':'人工坐席'}</strong><span>${fmtTime(j.created)}</span></div><div class="bubble">${j.payload.type==='text'?esc(j.payload.text):mediaHTML({type:j.payload.type,url:a?.preview_url,name:a?.filename||a?.name,size:a?.size})}</div><small class="${['failed','unknown','paused'].includes(j.state)?'error-text':''}">${esc(states[j.state]||j.state)}${j.error?' · '+esc(j.error):''}</small></article>`;}).join('');
   if(thread.dataset.signature!==content){thread.innerHTML=content;thread.dataset.signature=content;if(scroll||nearBottom)thread.scrollTop=thread.scrollHeight;buttonAction($('#load-earlier'),async()=>{if(S.limit>=100){const older=await api('/api/conversations/'+S.selected+'/messages?before='+d.next_before+'&limit=100');S.detail.messages=[...older.messages,...d.messages];S.detail.next_before=older.next_before;updateThread();}else {S.limit=100;await refreshConversations();}});
-    $$('.media-preview',thread).forEach(el=>el.addEventListener('error',()=>{const note=$('.media-fallback',el.closest('.bubble'));if(note)note.classList.remove('hidden');}));}
+    bindMediaPreviews(thread);}
 }
 function renderDrafts() {
   const root=$('#draft-list');if(!root)return;

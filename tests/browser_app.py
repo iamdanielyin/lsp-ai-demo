@@ -40,6 +40,7 @@ if __name__=='__main__':
                      'guide.pdf':(b'%PDF-1.4\n% LOCAL TEST\n%%EOF', 'application/pdf'),
                      'faq.md':(b'# Local synthetic FAQ', 'text/markdown')}
         def media_request(url, **kwargs):
+            if '--slow-media' in sys.argv:time.sleep(5)
             security.url_parts(url, kwargs['hosts'])
             data,mime=media_files[url.rsplit('/',1)[-1]]
             return data,{'content-type':mime}
