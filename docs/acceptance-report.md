@@ -1,6 +1,6 @@
 # LSP-AI Demo 验收报告
 
-日期：2026-09-23。结论：**Freshchat 路线可运行，本地验证通过；真实租户实现待验证，核心能力未全部通过。**
+日期：2026-09-24。结论：**Freshchat 路线可运行，本地验证通过；一例真实 Freshdesk 跟进工单创建及复用已通过，渠道核心能力未全部通过。**
 
 ## 本次归档复验（2026-09-22）
 
@@ -26,7 +26,7 @@
 
 ## 已完成的本地验证
 
-执行 `.venv/bin/python -m unittest discover -s tests -p 'test_*.py'`：**86 项通过，0 失败，13.932 秒**。完整输出：[local-test-results.txt](local-test-results.txt)。机器可读摘要：[local-evidence.json](local-evidence.json)。Python 编译、JavaScript 语法和 `pip check` 通过。
+执行 `.venv/bin/python -m unittest discover -s tests -v`：**91 项通过，0 失败，15.599 秒**。完整输出：[local-test-results.txt](local-test-results.txt)。机器可读摘要：[local-evidence.json](local-evidence.json)。Python 编译和 JavaScript 语法通过；`pip check` 为此前验证结果，本次未更改依赖。
 
 测试使用临时数据库、合成 RSA 签名、受控平台/模型响应，并阻止意外真实网络连接。覆盖：
 
@@ -77,7 +77,7 @@
 | T11 | 回声、人工优先 | passed；自身/坐席过滤、待发取消、在途状态 | blocked：真实机器人/坐席分配未核对 |
 | T12 | 追加消息与启用边界 | passed；生成期间追加取消、历史不补发、重启持久状态 | not_tested：真实连续追问待测 |
 | T13 | 限流、失败及重启 | passed；429、超时unknown、sending重启unknown | not_tested：真实供应商429/网络中断未测 |
-| T14 | Ticket闭环及去重 | passed；正确 requester、复用、原因规则、结果不明保护 | blocked：无真实 Freshdesk 建单；已有 Omni Ticket 复用路线未实现 |
+| T14 | Ticket闭环及去重 | passed；映射优先、无映射手动建单、复用、身份校验、原因规则及结果不明保护 | 部分 passed：一例真实 Freshdesk 建单/联系人及工单回读/重复请求复用；渠道尚为unknown，不能据此标WhatsApp或WeChat均通过；已有 Omni Ticket 复用路线未实现 |
 | T15 | 各渠道差异 | passed；独立能力记录、媒体门槛、无虚假“已送达” | blocked：WhatsApp及第二实际连接器均未实测 |
 | T16 | 输入与数据隔离 | passed；SSRF、文件、XSS、跨租户/会话、备注/凭证保护 | not_tested：客户真实私网部署及隐私审计未测 |
 | T17 | 外部调度 | passed；鉴权、参数、opt-in、恢复/清理、计数响应 | not_tested：外部调度中心真实调用待配置 |
@@ -167,3 +167,13 @@
 - 本轮供应商收发均为合成测试，客户原渠道媒体送达仍需真实测试。后台保留真实会话已保存的AI模式，不主动开启或关闭客户会话。
 
 - IM更新后8127后台已重启，附件会话字段迁移完成，管理员会话、设置和素材接口读取正常；既有AI模式保留。
+
+## 当前会话直接建单与真实验证（2026-09-24）
+
+- 原因：旧逻辑在已有会话身份的情况下仍强制手填 requester 映射。手动建单现优先采用已有映射；没有映射时读取并核对当前 Freshchat 客户，使用租户地址摘要与用户 ID 构成稳定 external ID，由 Freshdesk 创建或复用关联的 Demo 联系人。昵称仅作显示，不自动合并原有联系人。
+- 真实验证：用户指定的现有会话经正常管理员 API 提交，约2329毫秒后完成一张真实 Ticket，status=2。再次提交相同会话返回同一任务及工单，本地关联工单数量仍为1。
+- 另行 GET 工单和 Contact，确认返回的 requester_id、联系人 external ID、来源会话及测试摘要相符，回读约2232毫秒。真实编号和链接保留在本机任务/会话详情中，仓库不记录客户标识、租户域名或正文。
+- 该租户字段接口中公司为 required_for_agents=true，但本次真实建单 API 接受了没有 company_id 的请求；不将 UI 字段标记推断为全部租户的 API 要求，也未替客户填写公司。
+- 91项本地测试通过；新增覆盖无映射建单及同客户其他会话使用稳定标识、默认事项复用、规则自动仍需映射、客户资料不符拒绝、读取期间配置变化取消，以及unknown不重建/关联已有单时验证联系人、客户查询429限次重试。
+- 隔离浏览器使用空 requester 映射，从会话详情创建本地替身 Ticket 并重复点击复用，仅一个工单任务；检查任务返回真实结构的 requester_id。聊天输入区仍为图片/视频、附件、发送，控制台无错误。这部分只证明 UI 行为，真实 API 证据单独列在上方。
+- 正常后台已重启，重启前没有待执行或在途任务；建单前后目标会话 AI 模式一致。本次没有调用 OpenAI 或发送原渠道聊天回复，未验证 Freshdesk 可能触发的租户自动化通知；原工作台人工核对及 WhatsApp/WeChat 分渠道验收仍待执行。

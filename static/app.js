@@ -84,7 +84,7 @@ const groups = [
     ['ai_requests_per_minute','AI 每分钟请求数','number'],['daily_token_budget','每日 Token 预算','number'],['max_safe_retries','明确安全请求重试次数','number']]],
   ['freshdesk','Freshdesk 跟进工单','真实 requester 映射与重复提交保护',[
     ['freshdesk_domain','Freshdesk 官方域名','text','https://<TENANT>.freshdesk.com'],['freshdesk_api_key','Freshdesk API Key','secret'],
-    ['requester_mapping','Freshchat user_id → requester_id','json','{"<FRESHCHAT_USER_ID>":12345}','不能将 Freshchat user_id 直接作为 requester_id。',true],
+    ['requester_mapping','已有联系人映射（手动建单可留空）','json','{"<FRESHCHAT_USER_ID>":12345}','手动建单会自动关联当前 Freshchat 客户；首次可能创建 Freshdesk 联系人。填写映射则优先使用已核实的联系人，规则自动建单仍需映射。',true],
     ['ticket_group_id','工单组 ID（可选）','number'],['priority','优先级','select',[[1,'低'],[2,'中'],[3,'高'],[4,'紧急']]],['status','初始状态','select',[[2,'开放'],[3,'待处理'],[4,'已解决'],[5,'已关闭']]],
     ['ticket_policy','建单策略','select',[['manual','手动'],['confirm','建议确认'],['automatic','规则自动']]],
     ['ticket_tags','工单标签','list'],['ticket_allowed_reasons','自动建单允许原因','list','','模型建议必须精确匹配允许原因。'],
@@ -341,7 +341,7 @@ function renderInspector(preserveScroll=false) {
   buttonAction($('#close-inspector'),()=>{$('#inspector').hidden=true;$('#show-details').setAttribute('aria-expanded','false');$('#show-details').focus();});
   buttonAction($('#sync-history'),async()=>{await api('/api/conversations/'+c.id+'/sync',{method:'POST',body:{}});toast('历史同步已排队');});
   buttonAction($('#same-user'),async()=>{await api('/api/conversations/import',{method:'POST',body:{conversation_id:'',user_id:c.user_id}});await refreshConversations();});
-  buttonAction($('#create-ticket'),()=>modal('创建或复用跟进工单',`<label>跟进事项<textarea name="reason" required>${esc(generated?.result.plan.ticket_reason||'')}</textarea></label><label class="check-label"><input type="checkbox" name="new_matter">明确开启新的跟进事项，允许另建工单</label><small>默认返回当前会话已有工单。提交结果不明时不会自动重建。</small>`,async f=>{await api('/api/conversations/'+c.id+'/ticket',{method:'POST',body:{reason:f.get('reason'),new_matter:f.has('new_matter')}});await refreshConversations();toast('工单任务已提交或已有记录已复用');},'确认'));
+  buttonAction($('#create-ticket'),()=>modal('创建或复用跟进工单',`<p class="muted">客户 · ${esc(c.user_id.slice(-8))}：自动使用当前会话客户建单，首次可能创建关联的 Freshdesk 联系人。</p><label>跟进事项<textarea name="reason" required>${esc(generated?.result.plan.ticket_reason||'')}</textarea></label><label class="check-label"><input type="checkbox" name="new_matter">明确开启新的跟进事项，允许另建工单</label><small>默认返回当前会话已有工单。提交结果不明时不会自动重建。</small>`,async f=>{await api('/api/conversations/'+c.id+'/ticket',{method:'POST',body:{reason:f.get('reason'),new_matter:f.has('new_matter')}});await refreshConversations();toast('工单任务已提交或已有记录已复用');},'确认'));
   $$('.verify-job').forEach(b=>buttonAction(b,()=>verifyModal(b.dataset.id)));
   $$('.resolve-job').forEach(b=>buttonAction(b,()=>resolveModal(b.dataset.id)));
 }

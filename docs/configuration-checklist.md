@@ -35,7 +35,7 @@
 ## 媒体和工单，测到时再准备
 
 - **媒体和业务知识：** 获准使用的 JPEG/PNG 位置图、MP4 指引、PDF 方案，以及停车地址/FAQ 文本。在“知识与素材”填写；上传 PDF 不会自动解析成知识。当前视频发送需要上述公网 HTTPS 地址。远程素材或客户媒体预览的实际主机在高级设置中授权。
-- **工单：** 只需 Freshdesk 官方域名、API Key、测试客户 requester 映射。Key 位于 **右上角头像 → Profile settings → API Key**；requester ID 从真实 Contact / 联系人 API 核对，不能用 Freshchat user ID 代替。租户额外必填字段在高级设置填写。
+- **工单：** 手动测试只需 Freshdesk 官方域名和 API Key。Key 位于 **右上角头像 → Profile settings → API Key**；从会话详情点击建单即可自动使用当前客户，首次可能在 Freshdesk 创建 Demo 联系人。要复用原有联系人或启用规则自动建单时，再配置经核实的 requester 映射。租户额外必填字段在高级设置填写。
 - **外部调度：** 测试恢复/清理 API 时才生成独立 `scheduler_token`，见 [调度说明](scheduler.md)。正常消息处理无需先配调度中心。
 
 ## 已填好的默认值

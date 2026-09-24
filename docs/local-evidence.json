@@ -1,11 +1,11 @@
 {
-  "scope": "local_only_synthetic_providers_not_tenant_acceptance",
-  "date": "2026-09-23",
+  "scope": "local_synthetic_tests_with_separately_scoped_live_checks_not_full_tenant_acceptance",
+  "date": "2026-09-24",
   "unit_tests": {
     "command": ".venv/bin/python -m unittest discover -s tests -v",
-    "passed": 86,
+    "passed": 91,
     "failed": 0,
-    "duration_seconds": 13.932
+    "duration_seconds": 15.599
   },
   "syntax": [
     "python compileall passed",
@@ -251,5 +251,28 @@
       "local-screenshots/im-mobile.png"
     ],
     "real_channel_delivery": "not_tested"
+  },
+  "freshdesk_ticket_verification": {
+    "date": "2026-09-24",
+    "scope": "one_user_selected_conversation_real_freshdesk_api",
+    "status": "passed",
+    "created_tickets": 1,
+    "create_elapsed_ms": 2329,
+    "readback_elapsed_ms": 2232,
+    "requester_mapping_required_for_manual": false,
+    "requester_identity": "stable_namespaced_external_id_confirmed_by_contact_readback",
+    "ticket_status": 2,
+    "repeated_request_reused_same_job_and_ticket": true,
+    "source_conversation_verified": true,
+    "conversation_ai_mode_preserved": true,
+    "channel": "unknown",
+    "channel_acceptance": "not_tested",
+    "company_id_omitted_and_accepted": true,
+    "omni_ui_manually_verified": false,
+    "platform_notifications": "not_verified",
+    "live_model_calls": 0,
+    "chat_messages_sent_by_verification": 0,
+    "browser_scope": "isolated_local_stub_create_and_reuse_with_empty_mapping",
+    "identifiers": "retained_only_in_local_database"
   }
 }

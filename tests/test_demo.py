@@ -997,6 +997,75 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(self.svc.create_ticket(self.c['id'],'same')['state'],'unknown')
         with self.assertRaises(security.Problem):self.svc.create_ticket(self.c['id'],'another',new_matter=True)
 
+    def test_ticket_from_selected_customer_without_manual_mapping(self):
+        self.svc.settings.save({'requester_mapping':{}})
+        response=self.call('/api/conversations/%s/ticket'%self.c['id'],data={'reason':'本地建单测试'})
+        self.assertEqual(response.status_code,200,response.json)
+        job_id=response.json['job_id']
+        profile={'id':'user-1','first_name':'测试客户','org_contact_id':'999999','reference_id':'not-a-requester'}
+        with patch('lsp.providers.freshchat',return_value=profile) as chat,patch('lsp.providers.freshdesk',return_value={'id':100,'status':2,'requester_id':73}) as desk:
+            self.svc.drain()
+            chat.assert_called_once();self.assertEqual(chat.call_args.args[1],'/users/user-1')
+            payload=desk.call_args.args[3]
+            self.assertNotIn('requester_id',payload)
+            self.assertTrue(payload['unique_external_id'].startswith('lsp-freshchat:'))
+            self.assertEqual(payload['name'],'测试客户')
+            self.assertEqual(self.svc.public_job(job_id)['result']['requester_id'],73)
+            self.assertEqual(self.svc.create_ticket(self.c['id'],'重复点击')['ticket_id'],100)
+            desk.assert_called_once()
+        other=self.svc.add_conversation('conv-reopened','user-1','web')
+        self.svc.create_ticket(other['id'],'同客户另一个会话')
+        with patch('lsp.providers.freshchat',return_value=profile),patch('lsp.providers.freshdesk',return_value={'id':101,'status':2,'requester_id':73}) as desk:
+            self.svc.drain()
+            self.assertEqual(desk.call_args.args[3]['unique_external_id'],payload['unique_external_id'])
+        self.assertEqual(self.svc.settings.get()[0]['requester_mapping'],{})
+
+    def test_ticket_automatic_still_requires_mapping_and_profile_must_match(self):
+        self.svc.settings.save({'ticket_policy':'automatic','ticket_allowed_reasons':['人工跟进']})
+        c=self.svc.add_conversation('other','user-2','web')
+        self.svc.settings.save({'test_identity_allowlist':['user:user-1','user:user-2']})
+        with self.assertRaises(security.Problem) as error:self.svc.create_ticket(c['id'],'人工跟进',automatic=True)
+        self.assertEqual(error.exception.code,'requester_missing')
+        ticket=self.svc.create_ticket(c['id'],'手动测试')
+        with patch('lsp.providers.freshchat',return_value={'id':'user-1'}),patch('lsp.providers.freshdesk') as desk:
+            self.svc.drain();desk.assert_not_called()
+        job=self.svc.public_job(ticket['job_id'])
+        self.assertEqual(job['state'],'failed');self.assertEqual(job['error_code'],'requester_mismatch')
+
+    def test_ticket_fallback_rechecks_configuration_before_submit(self):
+        self.svc.settings.save({'requester_mapping':{}})
+        ticket=self.svc.create_ticket(self.c['id'],'读取期间修改设置')
+        def profile(*args):
+            self.svc.settings.save({'freshdesk_domain':'https://other.freshdesk.com'})
+            return {'id':'user-1'}
+        with patch('lsp.providers.freshchat',side_effect=profile),patch('lsp.providers.freshdesk') as desk:
+            self.svc.drain();desk.assert_not_called()
+        self.assertEqual(self.svc.public_job(ticket['job_id'])['state'],'cancelled')
+
+    def test_ticket_fallback_unknown_requires_verified_contact_when_linking(self):
+        self.svc.settings.save({'requester_mapping':{}})
+        ticket=self.svc.create_ticket(self.c['id'],'提交超时测试')
+        with patch('lsp.providers.freshchat',return_value={'id':'user-1'}),patch('lsp.providers.freshdesk',side_effect=security.Problem('network_unknown','timeout',502)) as desk:
+            self.svc.drain();self.svc.drain();desk.assert_called_once()
+        job=self.svc.public_job(ticket['job_id'])
+        self.assertEqual(job['state'],'unknown')
+        data={'action':'link_existing','platform_id':'100','evidence':'人工已核实平台工单'}
+        with patch('lsp.providers.freshdesk',side_effect=[{'id':100,'requester_id':73},{'id':73,'unique_external_id':'another-user'}]):
+            with self.assertRaises(security.Problem):self.svc.resolve_job(job['id'],data)
+        with patch('lsp.providers.freshdesk',side_effect=[{'id':100,'status':2,'requester_id':73},{'id':73,'unique_external_id':job['payload']['unique_external_id']}]):
+            self.svc.resolve_job(job['id'],data)
+        self.assertEqual(self.svc.create_ticket(self.c['id'],'重复点击')['ticket_id'],100)
+
+    def test_ticket_customer_lookup_rate_limit_is_bounded(self):
+        self.svc.settings.save({'requester_mapping':{}})
+        ticket=self.svc.create_ticket(self.c['id'],'读取限流测试')
+        with patch('lsp.providers.freshchat',side_effect=security.Problem('rate_limited','limited',429)),patch('lsp.providers.freshdesk') as desk:
+            for _ in range(4):
+                self.db.run('UPDATE jobs SET due=0');self.svc.drain()
+            desk.assert_not_called()
+        job=self.svc.public_job(ticket['job_id'])
+        self.assertEqual(job['attempts'],3);self.assertEqual(job['state'],'failed')
+
     def test_freshdesk_basic_auth_and_file_part_mapping(self):
         s,_=self.svc.settings.get()
         with patch('lsp.security.json_request',return_value=({'id':1},{})) as req:providers.freshdesk(s,'/tickets','POST',{'requester_id':42})

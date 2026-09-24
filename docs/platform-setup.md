@@ -68,7 +68,7 @@
 
 OpenAI 请求地址在连接区域直接配置，支持基础地址及完整 `/responses` 地址；默认 `https://api.openai.com/v1`。自定义服务须兼容 Responses 与结构化输出，并使用其对应的密钥。当前支持公网 HTTPS（443），拒绝 URL 凭证、查询参数、私网 DNS 结果与 API 重定向。更换地址后需重新检查。OpenAI 项目、组织 Header 仅有值时发送，不自动发现项目。检查会产生真实小额用量；失败展示固定脱敏错误，不将模型错误发给客户。默认模型为 `gpt-6-astra`（2026-09-18 官方模型目录核对），实际账号权限仍需检查；无权限时可在高级设置修改。自动策略更改后能力检查可能失效，重新完成所需检查再开启。
 
-Freshdesk API Key 使用 Basic `<API_KEY>:X`。在设置页为每个测试 Freshchat user_id 映射真实整数 requester_id。租户自定义必填字段需要先创建，`custom_field_mapping` 只接受已审核的 `cf_` 字段固定值。工单默认复用现有事项，包括已关闭单也不偷偷另建；管理员明确开启新事项才新建。提交不明可人工输入真实工单编号，服务端读取并验证 requester 后关联，禁止猜测重建。
+Freshdesk API Key 使用 Basic `<API_KEY>:X`。手动建单可直接从当前会话详情操作，无需手填 requester_id；若设置页已有真实 requester 映射则优先使用，否则通过官方 `unique_external_id` 创建或复用与该 Freshchat 客户对应的 Demo 联系人。规则自动建单仍需已核实的映射。租户自定义必填字段需要先创建，`custom_field_mapping` 只接受已审核的 `cf_` 字段固定值。工单默认复用现有事项，包括已关闭单也不偷偷另建；管理员明确开启新事项才新建。提交不明可人工输入真实工单编号，服务端读取并验证 requester；自动关联路径还会读取联系人核对 external ID，禁止猜测重建。
 
 ## 真实验收顺序
 

@@ -12,7 +12,7 @@
 | https://developers.freshchat.com/api/#upload_a_file | 单文件25MB上限；file_hash、file_security_status；SAFE_FILE 可发送，AV_PENDING 扫描中 |
 | https://developers.freshchat.com/api/#message_part_object | image.url；video.url/content_type；fileHash、fileSource、name、contentType、file_size_in_bytes；上传与发送字段分别映射 |
 | https://support.freshchat.com/support/solutions/articles/239404-freshchat-webhooks-payload-structure-and-authentication | 官方页面标注2022-06-06更新；action=message_create，data.message，Base64 签名 + SHA256withRSA；本实现验证原始字节 |
-| https://developers.freshdesk.com/api/#create_ticket | POST /api/v2/tickets，Basic API_KEY:X，requester_id、priority/status 和租户自定义字段 |
+| https://developers.freshdesk.com/api/#create_ticket | POST /api/v2/tickets，Basic API_KEY:X，支持 requester_id 或 unique_external_id；后者没有对应联系人时由平台创建。2026-09-24 经 Context7 和官方原文重核，手动建单使用此流程，返回真实 requester_id |
 | https://developers.openai.com/api/docs/models/gpt-6-astra | 当前官方旗舰模型 `gpt-6-astra` 支持 Responses 和 Structured Outputs；作为默认值，账号权限仍需真实检查 |
 | https://developers.openai.com/api/docs/guides/structured-outputs | Responses text.format JSON schema strict；单独处理 refusal / incomplete；遍历输出而非假设 output[0] |
 | https://developers.openai.com/api/reference/resources/responses/methods/create | store:false、模型 ID、输出预算、usage 和请求 ID；不用 previous_response_id |

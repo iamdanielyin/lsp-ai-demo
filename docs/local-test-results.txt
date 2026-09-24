@@ -76,7 +76,12 @@ test_signature_raw_bytes_missing_and_tamper (test_demo.DemoTests.test_signature_
 test_single_customer_selection_replaces_scope_and_cancels_pending_work (test_demo.DemoTests.test_single_customer_selection_replaces_scope_and_cancels_pending_work) ... ok
 test_sync_cursor_ignores_newer_webhook_and_fills_gap (test_demo.DemoTests.test_sync_cursor_ignores_newer_webhook_and_fills_gap) ... ok
 test_takeover_during_inflight_truthful (test_demo.DemoTests.test_takeover_during_inflight_truthful) ... ok
+test_ticket_automatic_still_requires_mapping_and_profile_must_match (test_demo.DemoTests.test_ticket_automatic_still_requires_mapping_and_profile_must_match) ... ok
+test_ticket_customer_lookup_rate_limit_is_bounded (test_demo.DemoTests.test_ticket_customer_lookup_rate_limit_is_bounded) ... ok
 test_ticket_dedup_requester_auth_payload_and_unknown (test_demo.DemoTests.test_ticket_dedup_requester_auth_payload_and_unknown) ... ok
+test_ticket_fallback_rechecks_configuration_before_submit (test_demo.DemoTests.test_ticket_fallback_rechecks_configuration_before_submit) ... ok
+test_ticket_fallback_unknown_requires_verified_contact_when_linking (test_demo.DemoTests.test_ticket_fallback_unknown_requires_verified_contact_when_linking) ... ok
+test_ticket_from_selected_customer_without_manual_mapping (test_demo.DemoTests.test_ticket_from_selected_customer_without_manual_mapping) ... ok
 test_ticket_rules_no_per_message_creation (test_demo.DemoTests.test_ticket_rules_no_per_message_creation) ... ok
 test_uncertain_ai_plan_still_sends_honest_reply (test_demo.DemoTests.test_uncertain_ai_plan_still_sends_honest_reply) ... ok
 test_unknown_source_allowlist_and_identity_isolation (test_demo.DemoTests.test_unknown_source_allowlist_and_identity_isolation) ... ok
@@ -86,6 +91,6 @@ test_webhook_atomic_persist_failure (test_demo.DemoTests.test_webhook_atomic_per
 test_wrong_channel_cannot_send_and_not_support_false_switch (test_demo.DemoTests.test_wrong_channel_cannot_send_and_not_support_false_switch) ... ok
 
 ----------------------------------------------------------------------
-Ran 86 tests in 13.932s
+Ran 91 tests in 15.599s
 
 OK

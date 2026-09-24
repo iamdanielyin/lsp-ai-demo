@@ -75,7 +75,7 @@ Freshchat请求应包含 `X-Freshchat-Signature`；程序记录 `X-Freshchat-Pay
 | --- | --- | --- |
 | `freshdesk_domain` | 空；建单必填 | 完整官方HTTPS origin，例如 `https://<TENANT>.freshdesk.com`，不带 `/api/v2`；管理员核对区域及API可用主机 |
 | `freshdesk_api_key` | 空；建单必填，敏感 | Freshdesk头像 → Profile settings → API Key；实际角色需有建单/读单权限。后端Basic `<KEY>:X` |
-| `requester_mapping` | `{}`；建单必填对应客户 | JSON `{"<FRESHCHAT_USER_ID>":12345}`；12345仅格式示例，须换成真实Freshdesk Contact/requester ID正整数。通过联系人详情/授权联系人API核实，不直接复用Freshchat user ID |
+| `requester_mapping` | `{}`；手动可留空，规则自动建单必填 | JSON `{"<FRESHCHAT_USER_ID>":12345}`，仅格式示例。填写时优先使用已核实的 Freshdesk Contact ID；手动建单留空时自动读取当前会话客户，以稳定 external ID 创建或复用 Demo 联系人。不把 Freshchat user ID 或 org_contact_id 当作 requester_id |
 | `ticket_group_id` | `null`，可选 | 管理员提供真实工单组ID正整数；页面留空表示不指定 |
 | `priority` | `1` | 1低、2中、3高、4紧急；页面选可读标签 |
 | `status` | `2` | 2开放、3待处理、4已解决、5已关闭；以租户流程核实 |
@@ -85,6 +85,8 @@ Freshchat请求应包含 `X-Freshchat-Signature`；程序记录 `X-Freshchat-Pay
 | `ticket_allowed_reasons` | `[]`；automatic必填 | 逗号分隔已允许的原因文本，模型 `ticket_reason` 需精确匹配；同时需有效requester映射和Freshdesk凭证 |
 
 同会话同跟进事项复用本地已有工单，即使已关闭也不偷偷另建。管理员“明确开启新的跟进事项”才可新建。提交超时标unknown，先核实再关联已有真实工单；不回滚已发客户消息。创建工单无需Freshdesk Webhook。
+
+自动联系人标识使用 `lsp-freshchat:<租户地址摘要>:<Freshchat用户ID>`，更换 Token 不改变此标识；昵称只用作显示名称，不作为匹配依据。该标识可能创建一个独立 Demo 联系人，不自动合并平台原有联系人；要使用原有联系人，可填写上面的可选映射。平台返回的真实 requester_id 保存在任务结果中；不会因手动建单改写全局设置或关闭其他会话 AI。租户字段设置与 API 实际必填行为分别核实，不猜测客户所属公司。
 
 ## 素材、媒体、历史与调度
 

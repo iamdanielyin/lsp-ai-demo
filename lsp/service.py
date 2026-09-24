@@ -892,9 +892,9 @@ class Service:
         self.send_guard(c, s)
         require(s["freshdesk_domain"] and s["freshdesk_api_key"], "freshdesk_not_configured", "请配置 Freshdesk 凭证", 409)
         requester = s["requester_mapping"].get(c["user_id"])
-        require(type(requester) is int and requester > 0, "requester_missing", "请将该 Freshchat 客户绑定至真实 requester_id", 409)
         if automatic:
             require(s["ticket_policy"] == "automatic" and reason in s["ticket_allowed_reasons"], "ticket_policy", "原因未获准自动建单", 409)
+            require(type(requester) is int and requester > 0, "requester_missing", "规则自动建单需先配置真实 requester_id 映射", 409)
         # One active follow-up per conversation by default; only an explicit new matter opens another slot.
         with self.db.connect():
             existing = self.db.one("SELECT * FROM tickets WHERE tenant=? AND conversation=? ORDER BY id DESC LIMIT 1", (c["tenant"], cid))
@@ -902,7 +902,12 @@ class Service:
                 return existing
             require(not existing or existing["state"] != "unknown", "ticket_unknown", "已有工单提交结果不明，请先核实后处理", 409)
             matter = uuid.uuid4().hex if new_matter else "followup"
-            job = self.enqueue("ticket", c, {"reason": reason, "matter": matter, "requester_id": requester}, origin="ticket")
+            payload = {"reason": reason, "matter": matter, "requester_id": requester}
+            if requester is None:
+                # Stable across token rotations; never interpret a Freshchat UUID/org ID as a Desk ID.
+                namespace = hashlib.sha256(s["platform_api_base_url"].encode()).hexdigest()[:24]
+                payload["unique_external_id"] = "lsp-freshchat:" + namespace + ":" + identifier(c["user_id"])
+            job = self.enqueue("ticket", c, payload, origin="ticket")
             self.db.run("INSERT INTO tickets(tenant,conversation,matter,job_id,state) VALUES(?,?,?,?,?)", (c["tenant"], cid, matter, job, "queued"))
             return self.db.one("SELECT * FROM tickets WHERE job_id=?", (job,))
 
@@ -914,16 +919,28 @@ class Service:
             self.send_guard(c, s)
             p = self.db.unseal(job["payload"])
             require(s["requester_mapping"].get(c["user_id"]) == p["requester_id"], "requester_changed", "客户工单映射已变化")
+            self.db.run("UPDATE jobs SET attempts=attempts+1,updated=? WHERE id=?", (time.time(), job["id"]))
+        identity = {"requester_id": p["requester_id"]}
+        if p["requester_id"] is None:
+            user = providers.freshchat(s, "/users/" + identifier(c["user_id"]))
+            require(isinstance(user, dict) and user.get("id") == c["user_id"], "requester_mismatch", "Freshchat 返回的客户身份与当前会话不符，已停止建单", 502)
+            name = " ".join(str(user.get(k) or "").strip() for k in ("first_name", "last_name")).strip()
+            identity = {"unique_external_id": p["unique_external_id"], "name": name[:200] or "Freshchat 客户 " + c["user_id"][-8:]}
+        with self.db.lock:
+            self.assert_current(job, self.conv(job["conversation"]))
             description = "<p>" + html.escape(p["reason"]) + "</p><p>来源：Freshchat 会话 " + html.escape(c["platform_id"]) + "；渠道 " + html.escape(c["channel"]) + "</p><p>本地映射，不代表 Freshchat 原生双向关联。未搬入完整聊天。</p>"
-            payload = {"requester_id": p["requester_id"], "subject": "LSP 停车客服跟进：" + p["reason"][:100], "description": description,
+            payload = {**identity, "subject": "LSP 停车客服跟进：" + p["reason"][:100], "description": description,
                        "priority": s["priority"], "status": s["status"], "tags": s["ticket_tags"], "custom_fields": s["custom_field_mapping"]}
             if s["ticket_group_id"]:
                 payload["group_id"] = s["ticket_group_id"]
-            self.db.run("UPDATE jobs SET state='sending',attempts=attempts+1,updated=? WHERE id=?", (time.time(), job["id"]))
+            self.db.run("UPDATE jobs SET state='sending',updated=? WHERE id=?", (time.time(), job["id"]))
             self.db.run("UPDATE tickets SET state='sending' WHERE job_id=?", (job["id"],))
         ticket = providers.freshdesk(s, "/tickets", "POST", payload)
         require(isinstance(ticket, dict) and type(ticket.get("id")) is int and ticket["id"] > 0, "acceptance_unknown", "建单未返回有效 ID，需核实是否创建", 502)
-        result = {"ticket_id": ticket["id"], "status": ticket.get("status"), "url": s["freshdesk_domain"] + "/a/tickets/" + str(ticket["id"])}
+        requester = ticket.get("requester_id", p["requester_id"])
+        require(type(requester) is int and requester > 0 and (p["requester_id"] is None or requester == p["requester_id"]),
+                "acceptance_unknown", "建单返回的 requester_id 缺失或不匹配，请核实工单后关联", 502)
+        result = {"ticket_id": ticket["id"], "requester_id": requester, "status": ticket.get("status"), "url": s["freshdesk_domain"] + "/a/tickets/" + str(ticket["id"])}
         self.db.run("UPDATE tickets SET ticket_id=?,status=?,url=?,state='accepted' WHERE job_id=?", (result["ticket_id"], result["status"], result["url"], job["id"]))
         self.settings.record(c["channel"], "ticket", "passed", c["platform_id"], result, job["id"], job["revision"], c["tenant"])
         return result
@@ -970,7 +987,15 @@ class Service:
                 require(isinstance(ticket_id, str) and ticket_id.isdigit(), "invalid_id", "需填写真实工单编号")
                 s, _ = self.settings.get()
                 ticket = providers.freshdesk(s, "/tickets/" + ticket_id)
-                require(ticket.get("id") == int(ticket_id) and ticket.get("requester_id") == job["payload"].get("requester_id"), "ticket_mismatch", "工单编号或 requester 不匹配")
+                require(isinstance(ticket, dict) and ticket.get("id") == int(ticket_id), "ticket_mismatch", "工单编号不匹配")
+                if job["payload"].get("unique_external_id"):
+                    requester = ticket.get("requester_id")
+                    require(type(requester) is int and requester > 0, "ticket_mismatch", "工单缺少有效 requester_id")
+                    contact = providers.freshdesk(s, "/contacts/" + str(requester))
+                    require(isinstance(contact, dict) and contact.get("id") == requester and contact.get("unique_external_id") == job["payload"]["unique_external_id"],
+                            "ticket_mismatch", "工单联系人与当前 Freshchat 客户不匹配")
+                else:
+                    require(ticket.get("requester_id") == job["payload"].get("requester_id"), "ticket_mismatch", "工单 requester 不匹配")
                 url = s["freshdesk_domain"] + "/a/tickets/" + ticket_id
                 self.db.run("UPDATE tickets SET state='accepted',ticket_id=?,status=?,url=? WHERE job_id=?", (int(ticket_id), ticket.get("status"), url, job_id))
                 self.db.run("UPDATE jobs SET state='completed',platform_id=?,updated=? WHERE id=?", (ticket_id, time.time(), job_id))
