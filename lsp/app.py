@@ -14,6 +14,7 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import providers, security
+from .message_parts import display_parts, part_preview, walk_parts
 from .security import Problem, identifier, require
 from .service import Service
 from .settings import CAPABILITIES, tenant_id
@@ -314,9 +315,12 @@ def create_app(config=None, start_worker=True):
         for r in rows:
             r["customer_name"] = service.customer_name(r, refresh=True)
             r["mode"] = "auto" if r["mode"] == "auto" else "manual"
-            latest = db.one("SELECT parts,created FROM messages WHERE conversation=? AND private=0 AND actor IN ('user','agent') ORDER BY created DESC,platform_id DESC LIMIT 1", (r["id"],))
-            parts = db.unseal(latest["parts"]) if latest else []
-            r["preview"] = " · ".join(p.get("text") or {"image": "[图片]", "video": "[视频]", "file": "[附件]"}.get(security.media_kind(p), "[消息]") for p in parts)[:120]
+            latest = db.one("SELECT parts,created,actor FROM messages WHERE conversation=? AND private=0 AND actor IN ('user','agent') ORDER BY created DESC,platform_id DESC LIMIT 1", (r["id"],))
+            parts = display_parts(db.unseal(latest["parts"]), latest["actor"] != "user") if latest else []
+            for _, part in walk_parts(parts):
+                if part["type"] in ("image", "video", "file"):
+                    part["type"] = security.media_kind(part)
+            r["preview"] = part_preview(parts)
             r["preview_time"] = latest["created"] if latest else ""
         rows = [r for r in rows if not query or query in (r["customer_name"] + " " + r["preview"] + " " + ("AI" if r["mode"] == "auto" else "人工")).casefold()]
         rows.sort(key=lambda r: r["preview_time"], reverse=True)
@@ -334,13 +338,13 @@ def create_app(config=None, start_worker=True):
         rows = db.all("SELECT * FROM messages WHERE conversation=? ORDER BY created DESC,platform_id DESC LIMIT ? OFFSET ?", (cid, size, before))
         s, _ = service.settings.get()
         for r in rows:
-            r["parts"] = db.unseal(r["parts"])
+            r["parts"] = display_parts(db.unseal(r["parts"]), r["actor"] != "user")
             r["role"] = "system" if r["actor"] == "system" else "private" if r["private"] else "customer" if r["actor"] == "user" else "agent"
             if r["actor_id"] == s["reply_actor_id"]:
                 own = db.one("SELECT origin FROM jobs WHERE tenant=? AND conversation=? AND platform_id=? AND kind='send'", (c["tenant"], cid, r["platform_id"]))
                 r["role"] = "ai" if own and own["origin"] == "ai" else r["role"]
-            for i, part in enumerate(r["parts"]):
-                if "url" in part:
+            for i, part in walk_parts(r["parts"]):
+                if part["type"] in ("image", "video", "file") and "url" in part:
                     part["type"] = security.media_kind(part)
                     original = part.pop("url")
                     part["url"] = f"/api/conversations/{cid}/media/{r['id']}/{i}" if original else ""
@@ -447,14 +451,14 @@ def create_app(config=None, start_worker=True):
     def media(token):
         return asset_content(service.media_token(token))
 
-    @app.get("/api/conversations/<int:cid>/media/<int:mid>/<int:part>")
+    @app.get("/api/conversations/<int:cid>/media/<int:mid>/<path:part>")
     def inbound_media(cid, mid, part):
         service.conv(cid)
-        row = db.one("SELECT parts FROM messages WHERE id=? AND conversation=?", (mid, cid))
+        row = db.one("SELECT parts,actor FROM messages WHERE id=? AND conversation=?", (mid, cid))
         require(row, "media_not_found", "媒体不存在", 404)
-        parts = db.unseal(row["parts"])
-        require(0 <= part < len(parts) and parts[part]["type"] in ("image", "video", "file"), "media_not_found", "媒体片段不存在", 404)
-        p = parts[part]
+        parts = display_parts(db.unseal(row["parts"]), row["actor"] != "user")
+        p = next((p for path, p in walk_parts(parts) if path == part), None)
+        require(p and p["type"] in ("image", "video", "file"), "media_not_found", "媒体片段不存在", 404)
         s, _ = service.settings.get()
         kind = security.media_kind(p)
         require(p.get("security_status") in (None, "", "SAFE_FILE"), "media_scan", "媒体尚未通过平台安全扫描", 409)

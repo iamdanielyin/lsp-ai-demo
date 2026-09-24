@@ -54,7 +54,27 @@ if __name__=='__main__':
             if i==120:row['message_parts']=[{'image':{'url':f'https://{media_host}/map.png'}}]
             if i==121:row['message_parts']=[{'file':{'url':f'https://{media_host}/guide.mp4','name':'本地指引.mp4','file_size':len(mp4),'content_type':'video/mp4'}}]
             if i==122:row['message_parts'] += [{'file':{'url':f'https://{media_host}/{name}','name':name}} for name in ('guide.pdf','faq.md')]
+            if i in (116,117,118,119):
+                row.update(actor_type='system',actor_id='LOCAL_TEST_SYSTEM')
+            if i==116:row['message_parts']=[{'text':{'content':'Conversation was assigned to group LOCAL_TEST by Topic Group mapping'}}]
+            if i==117:row['message_parts']=[{'text':{'content':'text: 您有張測試充電券未使用！\n您好！\n\n請在到期前使用測試優惠券。\n離場前在 App「優惠券」按「立即使用」即可。\n\n此為合成資料，不會領取或使用真實優惠券。\n\ntype: button\naction.type: link\naction.text: 查看測試優惠券\naction.url: https://example.com/coupon'}}]
+            if i==118:
+                row['message_parts']=[{'text':{'content':'選擇停車方案（本地合成卡片）'}}]
+                row['reply_parts']=[{'template_content':{'type':'carousel','sections':[{'name':'cards','parts':[
+                    {'template_content':{'type':'carousel_card_default','sections':[
+                        {'name':'hero_image','parts':[{'image':{'url':f'https://{media_host}/map.png'}}]},
+                        {'name':'title','parts':[{'text':{'content':name}}]},
+                        {'name':'description','parts':[{'text':{'content':'請按需要選擇；管理頁僅展示客戶側選項。'}}]},
+                        {'name':'view','parts':[{'url_button':{'label':'查看詳情','url':'https://example.com/parking'}}]},
+                        {'name':'callback','parts':[{'callback':{'label':'選擇方案','payload':'LOCAL_TEST_ONLY'}}]}
+                    ]}} for name in ('日租方案','月租方案')]}]}}]
+            if i==119:
+                row['message_parts']=[{'help_text':{'content':'<img src=x onerror="window.__xss=true"> 以下按钮仅展示。'}}]
+                row['reply_parts']=[{'collection':{'sub_parts':[{'quick_reply_button':{'label':'需要協助'}},{'url_button':{'label':'危险地址','url':'javascript:window.__xss=true'}}]}}]
             rows.append(row);svc.insert_message(c,normalize_message(row,c['platform_id']))
+            if i==117:
+                # Reproduce a legacy cache written before rich-part support.
+                svc.db.run('UPDATE messages SET parts=? WHERE conversation=? AND platform_id=?',(svc.db.seal([{'type':'text','text':row['message_parts'][0]['text']['content']}]),c['id'],row['id']))
         svc.db.run('UPDATE conversations SET sync_complete=1 WHERE id=?',(c['id'],))
         histories={c['platform_id']:rows}
         for suffix,name,mode in [('SECOND','林小姐的停车咨询与长期车位方案测试','auto'),('THIRD','Alex Chen','manual')]:

@@ -30,6 +30,7 @@
 | [lsp/security.py](../lsp/security.py) | URL/ID校验、公网DNS与TLS连接、固定错误、签名与文件校验 |
 | [lsp/providers.py](../lsp/providers.py) | Freshchat历史/发送/上传、Freshdesk请求、OpenAI Responses/Files/Vector Stores |
 | [lsp/service.py](../lsp/service.py) | 入站/测试码/历史/AI/知识库/人工/素材/工单/任务/恢复/清理的业务流程 |
+| [lsp/message_parts.py](../lsp/message_parts.py) | Freshchat文本/媒体/链接/卡片规范化、旧连接器文本兼容、嵌套媒体定位；不执行客户按钮回调 |
 | [templates/index.html](../templates/index.html) | 页面壳与对话框挂载点 |
 | [static/app.js](../static/app.js) | 登录、设置、测试账号开关、消息/任务、素材、工单、能力矩阵 |
 | [static/app.css](../static/app.css)、[favicon.svg](../static/favicon.svg) | 样式、响应式和图标 |
@@ -132,7 +133,7 @@ tenant指纹由平台地址和Token计算；轮换平台凭证也要求重新导
 | `PATCH /api/assets/{asset_id}` | 更新名称/用途/标签/渠道/启用，不替换队列绑定的文件版本 |
 | `POST /api/assets/{asset_id}/upload` | 真实平台图片/文件上传，视频准备签名引用 |
 | `GET /api/assets/{asset_id}/content` | 登录管理员预览/下载 |
-| `GET /api/conversations/{id}/media/{message_id}/{part}` | 管理员授权媒体代理，检查来源主机、MIME和大小 |
+| `GET /api/conversations/{id}/media/{message_id}/{part}` | 管理员授权媒体代理，part为片段索引或点分隔嵌套索引；检查所属会话、来源主机、MIME和大小 |
 | `GET /media/{token}` | 供平台抓取的24小时签名素材地址，限定租户/版本/用途 |
 | `POST /api/webhooks/freshchat` | 独立RSA签名，正常message_create载荷；不使用管理员登录 |
 | `POST /api/internal/jobs/drain` | 独立Scheduler Token、固定tasks、有界limit及显式执行；见调度文档 |

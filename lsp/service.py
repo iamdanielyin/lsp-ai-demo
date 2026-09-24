@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from . import providers, security
+from .message_parts import display_parts, normalize_parts, walk_parts
 from .security import Problem, identifier, require
 from .settings import Settings, tenant_id, test_identity_allowed
 from .store import dump
@@ -47,21 +48,8 @@ def normalize_message(message, cid):
     actor = message.get("actor_type", "system")
     actor = actor if actor in ("user", "agent") else "system"
     private = message.get("message_type") != "normal" or bool(message.get("botsPrivateNote")) or bool(message.get("private"))
-    parts = []
-    require(isinstance(message.get("message_parts", []), list), "message_format", "message_parts 必须为数组")
-    for part in message.get("message_parts", []):
-        require(isinstance(part, dict), "message_format", "消息片段格式不正确")
-        for kind in ("text", "image", "video", "file"):
-            val = part.get(kind)
-            if not isinstance(val, dict):
-                continue
-            if kind == "text":
-                parts.append({"type": "text", "text": str(val.get("content", ""))[:100000]})
-            else:
-                parts.append({"type": kind, "url": str(val.get("url", "")), "name": str(val.get("name", val.get("file_name", "媒体"))),
-                              "mime": str(val.get("content_type", val.get("contentType", val.get("file_content_type", "")))),
-                              "size": val.get("file_size_in_bytes", val.get("file_size")),
-                              "security_status": val.get("file_security_status")})
+    parts = normalize_parts(message.get("message_parts", [])) + normalize_parts(message.get("reply_parts", []))
+    parts = display_parts(parts, allow_legacy=actor != "user")
     if not parts:
         parts = [{"type": "unsupported", "text": "平台消息类型暂不支持预览"}]
     return {"platform_id": mid, "actor": actor, "actor_id": actor_id, "created": timestamp(message.get("created_time")),
@@ -161,7 +149,7 @@ class Service:
                         (c["tenant"], c["user_id"], self.db.seal(name), time.time()))
         return {"has_name": bool(name)}
 
-    def insert_message(self, c, m):
+    def insert_message(self, c, m, refresh_parts=False):
         if m["user_id"]:
             identifier(m["user_id"])
             require(not c["user_id"] or c["user_id"] == m["user_id"], "identity_mismatch", "消息客户 ID 与会话不一致，已停止处理", 409)
@@ -175,6 +163,10 @@ class Service:
         with self.db.connect() as conn:
             inserted = conn.execute("INSERT OR IGNORE INTO messages(tenant,conversation,platform_id,actor,actor_id,created,private,interaction,parts,cached_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                                     (c["tenant"], c["id"], m["platform_id"], m["actor"], m["actor_id"], m["created"], m["private"], m["interaction"], self.db.seal(m["parts"]), time.time())).rowcount
+            if not inserted and refresh_parts:
+                old = conn.execute("SELECT parts FROM messages WHERE tenant=? AND conversation=? AND platform_id=? AND actor=? AND actor_id=? AND private=?", (c["tenant"], c["id"], m["platform_id"], m["actor"], m["actor_id"], m["private"])).fetchone()
+                if old and self.db.unseal(old[0]) != m["parts"]:
+                    conn.execute("UPDATE messages SET parts=? WHERE tenant=? AND conversation=? AND platform_id=?", (self.db.seal(m["parts"]), c["tenant"], c["id"], m["platform_id"]))
             if m["actor"] == "user" and not m["private"]:
                 latest = conn.execute("SELECT platform_id FROM messages WHERE conversation=? AND actor='user' AND private=0 ORDER BY created DESC,platform_id DESC LIMIT 1", (c["id"],)).fetchone()
                 conn.execute("UPDATE conversations SET last_customer=?,updated=? WHERE id=?", (latest[0], time.time(), c["id"]))
@@ -550,7 +542,7 @@ class Service:
                     for row in page:
                         m = normalize_message(row, c["platform_id"])
                         cursor = max(cursor, m["created"])
-                        count += self.insert_message(c, m)
+                        count += self.insert_message(c, m, refresh_parts=True)
                         if m["actor"] == "agent" and m["actor_id"] != s["reply_actor_id"] and m["created"] > c["auto_since"]:
                             binding = self.discovery()["bindings"].get(c["channel"], {})
                             if c["mode"] == "auto" or (binding.get("status") == "starting" and binding.get("user_id") == c["user_id"]):
@@ -796,7 +788,7 @@ class Service:
         history = []
         for row in rows:
             parts = self.db.unseal(row["parts"])
-            visible = [{k: v for k, v in p.items() if k in ("type", "text", "name", "mime", "size")} for p in parts]
+            visible = [{k: v for k, v in p.items() if k in ("type", "text", "name", "mime", "size")} for _, p in walk_parts(parts)]
             history.append({"id": row["platform_id"], "actor": row["actor"], "time": row["created"], "parts": visible})
         require(history, "history_empty", "会话没有可提供给模型的公开客户历史", 409)
         assets = []

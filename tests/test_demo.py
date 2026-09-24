@@ -18,6 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from lsp.app import create_app
 from lsp import providers, security
 from lsp.service import Service, normalize_message
+from lsp.message_parts import display_parts, legacy_card, link_url, walk_parts
 from lsp.settings import DEFAULTS, Settings, tenant_id
 from lsp.store import dump
 
@@ -722,6 +723,74 @@ class DemoTests(unittest.TestCase):
         rows=self.call('/api/conversations/%s/messages'%self.c['id'],'GET').json['messages']
         self.assertEqual(next(m for m in rows if m['platform_id']=='system-event')['role'],'system')
         self.assertEqual(next(m for m in rows if m['platform_id']=='agent-note')['role'],'private')
+
+    def test_legacy_system_cards_render_cached_text_without_reimport(self):
+        text='text: 測試優惠券提醒\n您好！\n\n請開啟應用程式。\n\ntype: button\naction.type: link\naction.text: 查看優惠券\naction.url: https://example.com/coupon'
+        self.add_history(self.message('legacy-card','system',message_parts=[{'text':{'content':'old cache'}}]))
+        self.db.run("UPDATE messages SET parts=? WHERE platform_id='legacy-card'",(self.db.seal([{'type':'text','text':text}]),))
+        rows=self.call('/api/conversations/%s/messages'%self.c['id'],'GET').json['messages']
+        card=rows[0]['parts'][0]
+        self.assertEqual(rows[0]['role'],'system')
+        self.assertEqual(card['type'],'card')
+        self.assertEqual(card['parts'][0]['text'],'測試優惠券提醒\n您好！\n\n請開啟應用程式。')
+        self.assertEqual(card['parts'][1],{'type':'link','text':'查看優惠券','href':'https://example.com/coupon'})
+        self.assertEqual(normalize_message(self.message(message_parts=[{'text':{'content':text}}]),'conv-1')['parts'][0]['type'],'text')
+        self.assertIsNone(legacy_card(text+'\n不要吞掉这段额外说明'))
+        self.assertIsNone(legacy_card('Conversation was assigned to group Test'))
+        self.assertEqual(len(legacy_card(text+text[text.index('\ntype:'):])['parts']),3)
+        for value in ('javascript:alert(1)','data:text/html,test','//example.com','https://user:pass@example.com','https://example.com\\@evil.test','https://example.com\n'):
+            self.assertEqual(link_url(value),'')
+        self.assertEqual(legacy_card(text.replace('https://example.com/coupon','javascript:alert(1)'))['parts'][1]['href'],'')
+
+    def test_native_rich_parts_card_media_security_and_history_refresh(self):
+        host='fc-use1-00-pics-bkt-00.s3.amazonaws.com'
+        raw=self.message('native-card','system',message_parts=[{'text':{'content':'选择方案'}}],reply_parts=[
+            {'template_content':{'type':'carousel','sections':[{'name':'cards','parts':[
+                {'template_content':{'type':'carousel_card_default','sections':[
+                    {'name':'title','parts':[{'text':{'content':'<script>bad()</script>'}}]},
+                    {'name':'hero_image','parts':[{'image':{'url':'https://'+host+'/card.jpg'}}]},
+                    {'name':'view','parts':[{'url_button':{'url':'https://example.com/offer','label':'查看'}}]},
+                    {'name':'callback','parts':[{'callback':{'label':'选择','payload':'do-not-execute'}}]}
+                ]}}
+            ]}]}},
+            {'collection':{'sub_parts':[{'quick_reply_button':{'label':'稍后','payload':'hidden-payload'}},{'url_button':{'url':'javascript:alert(1)','label':'无效'}}]}}
+        ])
+        self.add_history(self.message('native-card','system',message_parts=[{'text':{'content':'选择方案'}}]))
+        with patch('lsp.providers.conversation',return_value={'conversation_id':'conv-1'}),patch('lsp.providers.history_pages',return_value=iter([[raw]])):
+            self.assertEqual(self.svc.sync(self.c['id'],full=True)['new_messages'],0)
+        self.assertEqual(self.db.one('SELECT count(*) n FROM messages')['n'],1)
+        detail=self.call('/api/conversations/%s/messages'%self.c['id'],'GET').json
+        parts=detail['messages'][0]['parts'];leaves=list(walk_parts(parts))
+        self.assertEqual(parts[1]['type'],'carousel')
+        image=next(p for _,p in leaves if p['type']=='image')
+        self.assertNotIn(host,json.dumps(detail))
+        self.assertNotIn('hidden-payload',json.dumps(detail))
+        self.assertEqual(next(p for _,p in leaves if p.get('text')=='查看')['href'],'https://example.com/offer')
+        self.assertEqual(next(p for _,p in leaves if p.get('text')=='无效')['href'],'')
+        with patch('lsp.app.security.request',return_value=(b'\xff\xd8\xff'+b'x'*20,{'content-type':'image/jpeg'})) as fetch:
+            self.assertEqual(self.app.test_client().get(image['url']).status_code,401)
+            self.assertEqual(self.client.get(image['url']).status_code,200)
+            self.assertEqual(fetch.call_args.kwargs['hosts'],[host])
+        self.assertEqual(self.client.get(image['url']+'.999').status_code,404)
+        other=self.svc.add_conversation('other-conversation','user-2')
+        self.assertEqual(self.client.get(image['url'].replace('/conversations/1/','/conversations/%s/'%other['id'])).status_code,404)
+        self.svc.insert_message(self.c,normalize_message({**raw,'message_type':'private','message_parts':[{'text':{'content':'new-private-content'}}]},'conv-1'),refresh_parts=True)
+        self.assertNotIn('new-private-content',json.dumps(self.db.unseal(self.db.one("SELECT parts FROM messages WHERE platform_id='native-card'")['parts'])))
+
+    def test_bot_parts_fallback_limits_and_plain_message_unchanged(self):
+        raw=self.message('bot-parts','system',message_parts=[{'help_text':{'content':'输入提示'}},{'text_input':{'placeholderText':'请输入邮箱','inputType':'EMAIL'}},
+            {'attachment_input':{'inputType':'IMAGE'}},{'reference':{'label':'停车FAQ','reference_id':'private-reference'}},{'future_type':{'body':'unknown'}}],
+            reply_parts=[{'template_content':{'type':'quick_reply_dropdown','sections':[{'name':'options','parts':[{'quick_reply_button':{'label':'月租'}}]}]}}])
+        parts=normalize_message(raw,'conv-1')['parts']
+        self.assertEqual([p['type'] for p in parts],['text','notice','notice','notice','unsupported','options'])
+        self.assertNotIn('private-reference',json.dumps(parts))
+        plain=[{'type':'text','text':'Conversation was assigned to group Test'}]
+        self.assertEqual(display_parts(plain,True),plain)
+        nested={'text':{'content':'too deep'}}
+        for _ in range(8):nested={'collection':{'sub_parts':[nested]}}
+        parts=normalize_message(self.message(message_parts=[nested]),'conv-1')['parts']
+        self.assertEqual(list(walk_parts(parts))[0][1]['type'],'unsupported')
+        with self.assertRaises(security.Problem):normalize_message(self.message(reply_parts={'invalid':True}),'conv-1')
 
     def test_conversation_names_cached_per_user_with_visible_preview_search(self):
         other=self.svc.add_conversation('second-conv','user-1')

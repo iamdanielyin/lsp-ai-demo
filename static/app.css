@@ -1405,6 +1405,22 @@ dialog::backdrop {
 .im-grid .message.agent,.im-grid .message.ai {margin-left:auto;margin-right:0}
 .im-grid .bubble {background:white;border:1px solid #e8ede6;border-radius:12px;line-height:1.65}
 .im-grid .agent .bubble,.im-grid .ai .bubble {background:#fff3b8;border-color:#e4cc68;color:#111}
+.im-grid .message.rich-message {max-width:min(520px,100%);width:fit-content}
+.rich-message .bubble,.rich-card,.rich-carousel,.message-group,.message-options {white-space:normal;min-width:0}
+.message-text {white-space:pre-wrap;overflow-wrap:anywhere}
+.message-text+.message-text {margin-top:8px}
+.rich-card {max-width:360px;border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden;padding:14px;color:#17271e}
+.rich-card>.message-text,.rich-section+.rich-section {margin-bottom:10px}
+.rich-title {font-weight:600;margin-bottom:8px}
+.rich-cards {display:flex;gap:12px;max-width:100%;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x proximity}
+.rich-cards>.rich-card {flex:0 0 min(280px,100%);scroll-snap-align:start}
+.message-action {display:block;text-align:center;border:1px solid #aecfbe;background:#edf7f0;color:#164d38;border-radius:7px;padding:9px 12px;margin-top:10px;text-decoration:none;overflow-wrap:anywhere;font-weight:600}
+.message-action:hover {background:#ddf0e3}
+.message-action.disabled {background:#f3f3f1;color:#72776f;border-color:var(--line);font-weight:400}
+.message-option {display:inline-block;padding:5px 10px;margin:4px 6px 0 0;border:1px solid var(--line);border-radius:14px;color:var(--muted);background:#f7f9f6;font-size:12px}
+.message-notice {font-size:12px;color:var(--muted);padding:7px 0}
+.message-options {margin-top:8px}
+.rich-card .chat-media,.rich-card .media-preview {max-width:100%}
 .im-grid .message-meta {font-size:11px}
 .im-grid .composer {margin:0;flex-shrink:0;padding:16px 22px 12px;background:white}
 .im-grid .composer textarea {min-height:64px;max-height:120px;resize:none;font-size:14px}

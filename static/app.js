@@ -337,11 +337,26 @@ function openMedia(button) {
   mediaViewer.open();
 }
 document.addEventListener('click',e=>{const button=e.target.closest('.chat-media');if(button)openMedia(button);});
+function partHTML(p) {
+  if(p.type==='text'||p.type==='unsupported')return `<div class="message-text">${esc(p.text)}</div>`;
+  if(['image','video','file'].includes(p.type))return mediaHTML(p);
+  if(p.type==='link'){
+    let href='';try{const u=new URL(p.href);if(['https:','http:'].includes(u.protocol)&&!u.username&&!u.password)href=u.href;}catch{}
+    return href?`<a class="message-action" href="${esc(href)}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">${esc(p.text||'打开链接')} ↗</a>`:`<span class="message-action disabled">${esc(p.text||'链接')} · 链接不可用</span>`;
+  }
+  if(p.type==='option')return `<span class="message-option" title="客户侧选项，仅展示，不代客户提交">${esc(p.text)}</span>`;
+  if(p.type==='notice')return `<div class="message-notice">${esc(p.text)}</div>`;
+  const children=(p.parts||[]).map(partHTML).join('');
+  if(p.type==='card')return `<div class="rich-card">${children}</div>`;
+  if(p.type==='carousel')return `<div class="rich-carousel">${children}</div>`;
+  if(p.type==='options')return `<details class="message-options"><summary>查看客户侧可选项</summary>${children}</details>`;
+  if(p.type==='group')return `<div class="message-group">${children}</div>`;
+  if(p.type==='section'){const style=p.name==='cards'?'rich-cards':['title','carousel_title','header'].includes(p.name)?'rich-title':'rich-section';return `<div class="${style}" ${p.name==='cards'?'tabindex="0" role="group" aria-label="消息卡片，可横向滚动"':''}>${children}</div>`;}
+  return '<span>此消息片段暂不支持预览，请在原工作台查看</span>';
+}
 function messageHTML(m) {
-  return `<article class="message ${esc(m.role)}" title="消息 ID：${esc(m.platform_id)}"><div class="message-meta"><strong>${roleNames[m.role]||m.actor}</strong><span>${fmtTime(m.created)}</span></div><div class="bubble">${m.parts.map(p=>{
-    if(p.type==='text'||p.type==='unsupported')return esc(p.text);
-    return mediaHTML(p);
-  }).join('')}<small class="media-fallback hidden">预览受来源白名单、链接有效期或浏览器限制；不代表客户发送失败。</small></div></article>`;
+  const rich=m.parts.some(p=>['card','carousel','link','option','group','options'].includes(p.type));
+  return `<article class="message ${esc(m.role)} ${rich?'rich-message':''}" title="消息 ID：${esc(m.platform_id)}"><div class="message-meta"><strong>${roleNames[m.role]||m.actor}</strong><span>${fmtTime(m.created)}</span></div><div class="bubble">${m.parts.map(partHTML).join('')}<small class="media-fallback hidden">预览受来源白名单、链接有效期或浏览器限制；不代表客户发送失败。</small></div></article>`;
 }
 function updateThread(scroll=false) {
   const d=S.detail,c=d.conversation;

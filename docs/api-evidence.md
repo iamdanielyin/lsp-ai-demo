@@ -19,6 +19,10 @@
 
 Context7 返回的聚合示例可能混入新建会话或特定 SDK 示例；实现以用户指定路线和官方原文为准，不将新建会话的 messages 数组用作已有会话批量回复。
 
+2026-09-24 通过 Context7 与 Freshchat 官方原文复核历史卡片：`message_parts` / `reply_parts` 支持 `url_button.url/label`、`collection.sub_parts`、`quick_reply_button`、`callback`，以及 `template_content.type/sections[].parts`（carousel、carousel_card_default、quick_reply_dropdown）。管理页按结构显示链接、图文卡片、横向轮播和客户侧选项；客户回调不在管理页执行。机器人 `help_text` 显示文本，输入/上传请求和 FAQ 引用显示提示，不虚构文章地址。官方参考页无明确更新时间，日期不可考。
+
+当前租户另有把 `text:`、`type: button`、`action.type: link`、`action.text`、`action.url` 写入纯文本的历史消息。这是实际连接器的兼容处理，不宣称为官方原生 part 格式；只有完整匹配的非客户文本转换成卡片，无法可靠识别时保留原文。旧文本缓存直接兼容，原生字段若曾被旧版忽略，可点击“同步历史”补齐；不会新增重复消息或补发回复。
+
 待真实租户核对：
 
 1. 当前 Omni 新交互是否仍可由 Freshchat 读取及回复。用户提供的2026年7月迁移说明是路线识别依据，但本次没有客户租户可实测。
