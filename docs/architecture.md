@@ -69,6 +69,7 @@ Webhook验签和事务完成后返回，不等待模型或平台外发。选定�
 | `meta` | 加密设置、版本、自动启用边界、管理员哈希、加密测试码与绑定状态 |
 | `sessions` | 管理会话ID、CSRF、有效期；Cookie为HttpOnly/SameSite，公网启用Secure |
 | `conversations` | 当前租户指纹、真实会话/用户/来源、渠道、模式、同步游标；唯一tenant+platform_id |
+| `customer_profiles` | 按 tenant+user_id 缓存加密客户名称与读取时间；不保存完整客户资料 |
 | `messages` | 平台消息ID、角色/时间/私有标记、加密parts；唯一tenant+conversation+platform_id |
 | `events` | 事件去重、载荷版本、重试次数；唯一tenant+conversation+message+action |
 | `assets` | 逻辑ID、版本、文件路径/MIME/大小、渠道、启用状态、加密平台引用 |
@@ -86,7 +87,7 @@ tenant指纹由平台地址和Token计算；轮换平台凭证也要求重新导
 
 ## 任务处理与外发边界
 
-任务类型为 `sync`、`activate_test`、`generate`、`send`、`ticket`。worker全局顺序执行；两渠道可同时处于AI模式，但模型请求不是并行执行。慢调用会使其他任务等待。
+任务类型为 `sync`、`profile`、`activate_test`、`generate`、`send`、`ticket`。`profile` 只读取客户名称，缓存24小时，空名称或失败也不随页面轮询反复请求；手动同步历史后可重新读取。worker全局顺序执行；两渠道可同时处于AI模式，但模型请求不是并行执行。慢调用会使其他任务等待。
 
 - 普通处理：queued → generating → completed/failed；发送为pending → sending → accepted/failed/unknown。
 - 人工/配置/客户追加取消旧任务；同计划后续条目在前项失败时paused。
@@ -114,13 +115,13 @@ tenant指纹由平台地址和Token计算；轮换平台凭证也要求重新导
 | `PUT /api/test-discovery/mode` | `{"channel":"WeChat","enabled":false}`，该渠道账号人工接管；true明确恢复 |
 | `DELETE /api/test-discovery` | 空JSON对象，结束全部测试；不是删除平台会话 |
 | `POST /api/conversations/import` | conversation_id或user_id；手动读取真实会话，保留旧导入方式 |
-| `GET /api/conversations` | 本地导入/事件产生的列表，q/channel筛选，无虚构全租户枚举接口 |
+| `GET /api/conversations` | 本地导入/事件产生的列表，含客户名称、最近公开消息及时间；q匹配名称/消息/人工或AI，兼容channel参数；前端仅提供一个搜索框 |
 | `POST /api/conversations/{id}/test-access` | 旧手动授权channel、scope；scope=customer会替换整个范围，不能用来追加双渠道测试 |
 | `GET /api/conversations/{id}/messages` | before偏移、limit最多100；返回时间范围、同步状态、任务/工单/日志 |
 | `POST /api/conversations/{id}/sync` | 排队全量补齐可访问历史 |
 | `POST /api/conversations/{id}/messages` | IM发送按钮提交messages及confirm_send=true；返回逐条任务ID |
 | `POST /api/conversations/{id}/attachments` | 管理员multipart上传file及type=image/file/video；自动准备引用，返回附件状态；仅限本会话人工发送 |
-| `PUT /api/conversations/{id}/mode` | mode=manual/auto/off；自动模式仍检查当前授权 |
+| `PUT /api/conversations/{id}/mode` | mode=manual/auto，即人工/AI；开启AI仍检查当前授权。旧库内部off兼容记录在列表及详情API中统一显示manual |
 | `POST /api/conversations/{id}/ai-preview` | 兼容旧接口；正常消息流程不需要预览，开启 AI 后直接生成并发送 |
 | `POST /api/conversations/{id}/ticket` | reason及new_matter；创建或复用事项工单任务 |
 | `GET/POST/DELETE /api/knowledge` | 查看、创建或删除当前租户 OpenAI Vector Store |
@@ -140,7 +141,7 @@ tenant指纹由平台地址和Token计算；轮换平台凭证也要求重新导
 
 ## 外部API与代码边界
 
-Freshchat：`GET /v2/agents`、`GET /v2/conversations/{platform_id}`、`GET .../messages`、`GET /v2/users/{user_id}/conversations`、`POST .../messages`、`POST /v2/images/upload`、`POST /v2/files/upload`。消息外层normal/agent/真实actor_id，多条独立回复逐条POST。无自造 `/videos/upload`。
+Freshchat：`GET /v2/agents`、`GET /v2/conversations/{platform_id}`、`GET .../messages`、`GET /v2/users/{user_id}`（读取first_name/last_name）、`GET /v2/users/{user_id}/conversations`、`POST .../messages`、`POST /v2/images/upload`、`POST /v2/files/upload`。消息外层normal/agent/真实actor_id，多条独立回复逐条POST。无自造 `/videos/upload`。
 
 Freshdesk：Basic `<API_KEY>:X`，跟进建单 `POST /api/v2/tickets`，读真实Ticket用于核实关联；不包含新版Omni公开会话回复适配。OpenAI：配置地址的Responses端点、Bearer、可选Project/Organization Header、严格schema及store=false；知识库额外使用 Files、Vector Stores 及 Responses `file_search`。
 

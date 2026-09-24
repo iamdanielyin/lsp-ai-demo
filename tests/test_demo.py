@@ -723,6 +723,67 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(next(m for m in rows if m['platform_id']=='system-event')['role'],'system')
         self.assertEqual(next(m for m in rows if m['platform_id']=='agent-note')['role'],'private')
 
+    def test_conversation_names_cached_per_user_with_visible_preview_search(self):
+        other=self.svc.add_conversation('second-conv','user-1')
+        self.add_history(self.message('question',created='2030-01-01T01:00:00Z'))
+        self.add_history(self.message('answer','agent',created='2030-01-01T02:00:00Z',message_parts=[{'text':{'content':'停车入口在东门'}}]))
+        self.add_history(self.message('note','agent',private=True,created='2030-01-01T03:00:00Z'))
+        self.add_history(self.message('system','system',created='2030-01-01T04:00:00Z'))
+        self.call('/api/conversations','GET');self.call('/api/conversations','GET')
+        self.assertEqual(self.db.one("SELECT count(*) n FROM jobs WHERE kind='profile'")['n'],1)
+        with patch('lsp.providers.freshchat',return_value={'id':'user-1','first_name':'  王  ','last_name':'小明','email':'not-for-display@example.test'}) as api:
+            self.assertEqual(self.svc.drain()['failed'],0)
+            self.assertEqual(api.call_count,1)
+        for query in ('王','东门'):
+            result=self.call('/api/conversations?q='+query,'GET').json['conversations']
+            self.assertEqual(result[0]['id'],self.c['id'])
+            self.assertEqual(result[0]['customer_name'],'王 小明')
+            self.assertEqual(result[0]['mode'],'manual')
+            self.assertEqual(result[0]['preview'],'停车入口在东门')
+            self.assertEqual(result[0]['preview_time'],'2030-01-01T02:00:00.000Z')
+        self.assertEqual(self.call('/api/conversations?q=user-1','GET').json['conversations'],[])
+        self.assertEqual(self.call('/api/conversations?q=王','GET').json['conversations'][1]['id'],other['id'])
+        detail=self.call('/api/conversations/%s/messages'%self.c['id'],'GET').json
+        self.assertEqual(detail['conversation']['customer_name'],'王 小明')
+        self.assertEqual(detail['conversation']['mode'],'manual')
+        self.assertNotIn('not-for-display',json.dumps(detail))
+        self.assertNotIn('王',self.db.one('SELECT name FROM customer_profiles')['name'])
+        self.assertEqual(self.db.one("SELECT count(*) n FROM jobs WHERE kind='profile'")['n'],1)
+
+    def test_customer_name_failure_empty_name_and_tenant_change(self):
+        self.call('/api/conversations','GET')
+        with patch('lsp.providers.freshchat',return_value={'id':'different-user','first_name':'Wrong person'}):
+            self.assertEqual(self.svc.drain()['failed'],1)
+        self.assertEqual(self.db.one("SELECT error_code FROM jobs WHERE kind='profile'")['error_code'],'customer_mismatch')
+        self.assertEqual(self.call('/api/conversations','GET').json['conversations'][0]['customer_name'],'未命名客户')
+        self.assertEqual(self.db.one("SELECT count(*) n FROM jobs WHERE kind='profile'")['n'],1)
+        self.db.run('UPDATE customer_profiles SET checked_at=0')
+        self.call('/api/conversations','GET')
+        with patch('lsp.providers.freshchat',return_value={'id':'user-1','first_name':' ','last_name':None}):
+            self.assertEqual(self.svc.drain()['failed'],0)
+        self.assertEqual(self.svc.customer_name(self.c),'未命名客户')
+        self.svc.settings.save({'freshchat_token':'other-tenant-token'})
+        new=self.svc.add_conversation('new-tenant-conv','user-1')
+        self.assertEqual(self.svc.customer_name(new),'未命名客户')
+        self.assertEqual(self.call('/api/conversations/%s/mode'%new['id'],'PUT',{'mode':'off'}).status_code,400)
+
+    def test_customer_profile_restart_and_expired_cache_cleanup(self):
+        self.call('/api/conversations','GET')
+        self.db.run("UPDATE jobs SET state='generating' WHERE kind='profile'")
+        self.svc.recover_after_restart()
+        with patch('lsp.providers.freshchat',return_value={'id':'user-1','first_name':'测试昵称'}):
+            self.svc.drain()
+        self.assertEqual(self.svc.customer_name(self.c),'测试昵称')
+        self.db.run('UPDATE customer_profiles SET checked_at=0')
+        self.add_history()
+        self.db.run('UPDATE messages SET cached_at=0')
+        self.db.run("UPDATE jobs SET state='failed' WHERE kind='profile'")
+        self.assertEqual(self.svc.cleanup(20,True),1)
+        self.assertEqual(self.db.one('SELECT count(*) n FROM customer_profiles')['n'],1)
+        self.assertEqual(self.svc.cleanup(20,False),1)
+        self.assertEqual(self.db.one('SELECT count(*) n FROM customer_profiles')['n'],0)
+        self.assertEqual(self.db.one('SELECT count(*) n FROM messages')['n'],0)
+
     def test_history_media_file_parts_video_range_and_attachment_download(self):
         host='fc-use1-00-files-bkt-00.s3.amazonaws.com'
         mp4=(Path(__file__).parent/'fixtures'/'local-video.mp4').read_bytes()

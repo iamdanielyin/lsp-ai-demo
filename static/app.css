@@ -636,20 +636,9 @@ hr {
   padding:17px;
   border-bottom:1px solid var(--line)
 }
-.list-head h3 {
-  margin-bottom:12px;
-  display:flex;
-  justify-content:space-between;
-  align-items:center
-}
 .list-head input {
   font-size:12px;
   padding:9px
-}
-.list-head select {
-  font-size:12px;
-  padding:7px;
-  margin-top:7px
 }
 .list-items {
   max-height:690px;
@@ -661,7 +650,7 @@ hr {
   border:0;
   border-radius:0;
   background:transparent;
-  padding:17px;
+  padding:12px 15px;
   border-bottom:1px solid #e8ede6
 }
 .conversation-item.selected {
@@ -669,20 +658,19 @@ hr {
   box-shadow:inset 3px 0 var(--accent)
 }
 .conversation-item strong {
-  display:block;
-  font-size:12px;
-  margin-bottom:8px;
-  overflow:hidden;
-  text-overflow:ellipsis
-}
-.conversation-item p {
-  font-size:12px;
-  color:var(--muted);
+  min-width:0;
+  flex:1;
+  font-size:13px;
   overflow:hidden;
   white-space:nowrap;
-  text-overflow:ellipsis;
-  margin-top:8px
+  text-overflow:ellipsis
 }
+.conversation-row {display:flex;align-items:center;gap:10px;min-width:0;line-height:22px}
+.conversation-row+.conversation-row {margin-top:3px;color:var(--muted);font-size:11px}
+.conversation-preview {flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.conversation-row time {flex-shrink:0;font-size:10px;font-variant-numeric:tabular-nums}
+.conversation-mode {flex-shrink:0;font-size:10px;line-height:18px;border-radius:4px;padding:0 6px;color:#59675f;background:#edf0eb}
+.conversation-mode.ai {color:var(--accent);background:#dcefe3}
 .message-pane {
   display:flex;
   min-width:0;
@@ -1282,13 +1270,6 @@ dialog::backdrop {
     grid-template-columns:1fr 1fr;
     gap:8px
   }
-  .list-head h3 {
-    grid-column:1/-1;
-    margin-bottom:0
-  }
-  .list-head select {
-    margin:0
-  }
   .inspector {
     grid-template-columns:1fr
   }
@@ -1385,9 +1366,6 @@ dialog::backdrop {
   .list-head {
     grid-template-columns:1fr
   }
-  .list-head h3 {
-    grid-column:auto
-  }
 
 }
 @media(prefers-reduced-motion:reduce) {
@@ -1413,9 +1391,7 @@ dialog::backdrop {
 .im-grid [hidden] {display:none!important}
 .im-grid .conversation-list {display:flex;flex-direction:column;min-height:0}
 .im-grid .list-items {flex:1;min-height:0;max-height:none;overflow-y:auto}
-.im-grid .list-head {display:block;flex-shrink:0}
-.im-grid .list-head h3 {gap:8px}
-.im-grid #conv-tools {margin-left:auto;font-size:20px;line-height:1}
+.im-grid .list-head {display:block;flex-shrink:0;padding:12px}
 .im-grid .message-pane {min-height:0;overflow:hidden}
 .im-grid .thread-head {flex-shrink:0;min-height:76px;padding:16px 22px}
 .chat-identity {flex:1;min-width:0}

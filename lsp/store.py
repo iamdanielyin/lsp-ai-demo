@@ -15,6 +15,9 @@ def dump(value):
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS customer_profiles (
+ tenant TEXT NOT NULL, user_id TEXT NOT NULL, name TEXT NOT NULL, checked_at REAL NOT NULL,
+ PRIMARY KEY(tenant,user_id));
 CREATE TABLE IF NOT EXISTS conversations (
  id INTEGER PRIMARY KEY, tenant TEXT NOT NULL, platform_id TEXT NOT NULL, user_id TEXT NOT NULL DEFAULT '',
  source TEXT NOT NULL DEFAULT '', channel TEXT NOT NULL DEFAULT 'unknown', topic_id TEXT NOT NULL DEFAULT '',

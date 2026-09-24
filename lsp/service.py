@@ -137,6 +137,30 @@ class Service:
         c = self.db.one("SELECT * FROM conversations WHERE tenant=? AND platform_id=?", (tenant, platform_id))
         return c
 
+    def customer_name(self, c, refresh=False):
+        with self.db.connect():
+            cached = self.db.one("SELECT name,checked_at FROM customer_profiles WHERE tenant=? AND user_id=?", (c["tenant"], c["user_id"]))
+            if refresh and c["user_id"] and (not cached or cached["checked_at"] < time.time() - 86400):
+                pending = self.db.one("SELECT j.id FROM jobs j JOIN conversations c ON c.id=j.conversation WHERE j.tenant=? AND c.user_id=? AND j.kind='profile' AND j.state IN ('queued','generating')", (c["tenant"], c["user_id"]))
+                if not pending:
+                    self.enqueue("profile", c)
+                    # Cache failed/empty lookups too, so polling never floods the platform.
+                    self.db.run("INSERT INTO customer_profiles VALUES(?,?,?,?) ON CONFLICT(tenant,user_id) DO UPDATE SET checked_at=excluded.checked_at",
+                                (c["tenant"], c["user_id"], self.db.seal(""), time.time()))
+            return (self.db.unseal(cached["name"]) if cached else "") or "未命名客户"
+
+    def sync_customer_profile(self, job):
+        c = self.conv(job["conversation"])
+        s, revision = self.settings.get()
+        user = providers.freshchat(s, "/users/" + identifier(c["user_id"]))
+        require(isinstance(user, dict) and user.get("id") == c["user_id"], "customer_mismatch", "平台返回的客户身份不匹配", 502)
+        name = " ".join(user.get(key, "").strip() for key in ("first_name", "last_name") if isinstance(user.get(key), str)).strip()[:200]
+        with self.db.lock:
+            require(self.settings.get()[1] == revision and revision == job["revision"], "stale_plan", "配置已变化，客户资料更新取消", 409)
+            self.db.run("INSERT INTO customer_profiles VALUES(?,?,?,?) ON CONFLICT(tenant,user_id) DO UPDATE SET name=excluded.name,checked_at=excluded.checked_at",
+                        (c["tenant"], c["user_id"], self.db.seal(name), time.time()))
+        return {"has_name": bool(name)}
+
     def insert_message(self, c, m):
         if m["user_id"]:
             identifier(m["user_id"])
@@ -539,6 +563,8 @@ class Service:
             if c["channel"] != "unknown":
                 self.settings.record(c["channel"], "history", "passed", c["platform_id"], {"new_messages": count, "scope": "所有可访问页；平台已删除记录不包含"}, revision=revision, tenant=c["tenant"])
             self.db.log(c["tenant"], cid, "history_synced", f"新增 {count} 条；所有可访问页已读取")
+            if full:
+                self.db.run("UPDATE customer_profiles SET checked_at=0 WHERE tenant=? AND user_id=?", (c["tenant"], c["user_id"]))
             return {"new_messages": count, "complete": True}
         except Problem as e:
             self.db.run("UPDATE conversations SET sync_error=?,sync_complete=0 WHERE id=?", (e.message, cid))
@@ -872,6 +898,8 @@ class Service:
                         self.db.run("UPDATE jobs SET state='generating',attempts=attempts+1,updated=? WHERE id=? AND state='queued'", (time.time(), job["id"]))
                     if job["kind"] == "sync":
                         result = self.sync(job["conversation"], self.db.unseal(job["payload"]).get("full", False))
+                    elif job["kind"] == "profile":
+                        result = self.sync_customer_profile(job)
                     elif job["kind"] == "activate_test":
                         result = self.activate_test(job)
                     elif job["kind"] == "generate":
@@ -902,7 +930,7 @@ class Service:
         state = "unknown" if current["state"] == "sending" and uncertain else "failed"
         if current["state"] == "cancelled" or error.code == "stale_plan":
             state = "cancelled"
-        safe = error.code == "rate_limited" or job["kind"] == "sync" and error.code in ("network_failed", "upstream_unavailable")
+        safe = error.code == "rate_limited" or job["kind"] in ("sync", "profile") and error.code in ("network_failed", "upstream_unavailable")
         if safe and state != "cancelled" and current["attempts"] <= s["max_safe_retries"]:
             state = "pending" if job["kind"] == "send" else "queued"
         self.db.run("UPDATE jobs SET state=?,error_code=?,error=?,due=?,updated=? WHERE id=?",
@@ -1164,7 +1192,7 @@ class Service:
         cutoff = time.time() - s["local_retention_days"] * 86400
         # Keep full context for active or unverified conversations; cleanup never touches platform data.
         protected = set()
-        for job in self.db.all("SELECT conversation,state,result FROM jobs WHERE conversation IS NOT NULL"):
+        for job in self.db.all("SELECT conversation,state,result FROM jobs WHERE conversation IS NOT NULL AND kind!='profile'"):
             verified = job["state"] == "accepted" and job["result"] and self.db.unseal(job["result"]).get("verification")
             if job["state"] not in ("completed", "cancelled", "delivered") and not verified:
                 protected.add(job["conversation"])
@@ -1176,6 +1204,7 @@ class Service:
                     conn.execute("DELETE FROM messages WHERE id=?", (row["id"],))
                     conn.execute("UPDATE conversations SET sync_complete=0,sync_error='本地缓存已清理，请重新同步平台历史' WHERE id=?", (row["conversation"],))
                 conn.execute("DELETE FROM sessions WHERE expires<?", (time.time(),))
+                conn.execute("DELETE FROM customer_profiles WHERE rowid IN (SELECT rowid FROM customer_profiles WHERE checked_at<? LIMIT ?)", (cutoff, limit))
                 conn.execute("DELETE FROM logs WHERE id IN (SELECT id FROM logs WHERE created<? LIMIT ?)", (cutoff, limit))
                 conn.execute("DELETE FROM usage WHERE created<?", (min(cutoff, time.time() - 86400),))
         return len(rows)

@@ -310,16 +310,23 @@ def create_app(config=None, start_worker=True):
             rows = [r for r in rows if not r["assigned_agent_id"] or r["assigned_agent_id"] == s["reply_actor_id"]]
         query = request.args.get("q", "").casefold()
         channel = request.args.get("channel", "")
-        rows = [r for r in rows if (not query or query in (r["platform_id"] + " " + r["user_id"]).casefold()) and (not channel or channel == r["channel"])]
+        rows = [r for r in rows if not channel or channel == r["channel"]]
         for r in rows:
-            latest = db.one("SELECT parts FROM messages WHERE conversation=? ORDER BY created DESC,platform_id DESC LIMIT 1", (r["id"],))
+            r["customer_name"] = service.customer_name(r, refresh=True)
+            r["mode"] = "auto" if r["mode"] == "auto" else "manual"
+            latest = db.one("SELECT parts,created FROM messages WHERE conversation=? AND private=0 AND actor IN ('user','agent') ORDER BY created DESC,platform_id DESC LIMIT 1", (r["id"],))
             parts = db.unseal(latest["parts"]) if latest else []
-            r["preview"] = " · ".join(p.get("text") or {"image": "[图片]", "video": "[视频]", "file": "[文件]"}.get(p["type"], "[消息]") for p in parts)[:120]
+            r["preview"] = " · ".join(p.get("text") or {"image": "[图片]", "video": "[视频]", "file": "[附件]"}.get(security.media_kind(p), "[消息]") for p in parts)[:120]
+            r["preview_time"] = latest["created"] if latest else ""
+        rows = [r for r in rows if not query or query in (r["customer_name"] + " " + r["preview"] + " " + ("AI" if r["mode"] == "auto" else "人工")).casefold()]
+        rows.sort(key=lambda r: r["preview_time"], reverse=True)
         return jsonify(conversations=rows)
 
     @app.get("/api/conversations/<int:cid>/messages")
     def messages(cid):
         c = service.conv(cid)
+        c["customer_name"] = service.customer_name(c)
+        c["mode"] = "auto" if c["mode"] == "auto" else "manual"
         try:
             before, size = int(request.args.get("before", "0")), min(100, max(1, int(request.args.get("limit", "50"))))
         except ValueError:
@@ -357,7 +364,9 @@ def create_app(config=None, start_worker=True):
 
     @app.put("/api/conversations/<int:cid>/mode")
     def mode(cid):
-        return jsonify(service.set_mode(cid, body().get("mode")))
+        requested = body().get("mode")
+        require(requested in ("manual", "auto"), "invalid_mode", "请选择人工回复或 AI 回复")
+        return jsonify(service.set_mode(cid, requested))
 
     @app.post("/api/conversations/<int:cid>/attachments")
     def attachment(cid):

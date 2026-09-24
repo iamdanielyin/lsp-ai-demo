@@ -5,6 +5,7 @@ import json
 import struct
 import sys
 import tempfile
+import time
 import zlib
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -55,6 +56,16 @@ if __name__=='__main__':
             if i==122:row['message_parts'] += [{'file':{'url':f'https://{media_host}/{name}','name':name}} for name in ('guide.pdf','faq.md')]
             rows.append(row);svc.insert_message(c,normalize_message(row,c['platform_id']))
         svc.db.run('UPDATE conversations SET sync_complete=1 WHERE id=?',(c['id'],))
+        histories={c['platform_id']:rows}
+        for suffix,name,mode in [('SECOND','林小姐的停车咨询与长期车位方案测试','auto'),('THIRD','Alex Chen','manual')]:
+            extra=svc.add_conversation('LOCAL_CONV_'+suffix,'LOCAL_USER_'+suffix)
+            row={'id':'LOCAL_MSG_'+suffix,'conversation_id':extra['platform_id'],'user_id':extra['user_id'],
+                 'actor_type':'user','actor_id':extra['user_id'],'message_type':'normal','created_time':datetime.now(timezone.utc).isoformat(),
+                 'message_parts':[{'text':{'content':'想了解月租方案，周末能否进出停车场？这是一条用于检查省略号的长消息。'}}]}
+            svc.insert_message(extra,normalize_message(row,extra['platform_id']))
+            svc.db.run('UPDATE conversations SET sync_complete=1,mode=? WHERE id=?',(mode,extra['id']))
+            svc.db.run('INSERT INTO customer_profiles VALUES(?,?,?,?)',(extra['tenant'],extra['user_id'],svc.db.seal(name),time.time()))
+            histories[extra['platform_id']]=[row]
         asset=svc.save_asset({'asset_id':'LOCAL_TEST_PDF','name':'本地测试 PDF','purpose':'仅用于 UI 测试，不是真实方案','channels':['Webchat']},b'%PDF-1.4\n% Local browser test only\n%%EOF\n','LOCAL_TEST.pdf','application/pdf')
         svc.db.run("UPDATE assets SET state='sendable',ref=? WHERE id=?",(svc.db.seal({'file_hash':'LOCAL_TEST_HASH'}),asset['id']))
         counter=itertools.count(1)
@@ -68,7 +79,7 @@ if __name__=='__main__':
         def model(settings,payload):
             plan={'messages':[{'type':'text','text':'这是本地 UI 测试模型替身的回复，不代表 OpenAI 已验收。','asset_id':None}], 'needs_human':False,'ticket_reason':'本地测试跟进'}
             return {'id':'LOCAL_TEST_RESPONSE','status':'completed','output':[{'type':'message','content':[{'type':'output_text','text':json.dumps(plan)}]}],'usage':{'input_tokens':100,'output_tokens':30,'total_tokens':130}},'LOCAL_TEST_REQUEST'
-        with patch('lsp.providers.agents',return_value=[{'id':'LOCAL_TEST_AGENT','name':'本地测试坐席'}]),patch('lsp.providers.conversation',return_value={'conversation_id':c['platform_id']}),patch('lsp.providers.history_pages',side_effect=lambda *args:iter([rows.copy()])),patch('lsp.providers.upload',side_effect=lambda s,a,data: ({'url':'https://local-test.example/image.png'} if a['kind']=='image' else {'file_hash':'LOCAL_TEST_HASH','file_security_status':'SAFE_FILE'},'sendable')),patch('lsp.providers.send_message',side_effect=send),patch('lsp.providers.openai',side_effect=model),patch('lsp.providers.freshchat',return_value={'id':'LOCAL_TEST_CUSTOMER','first_name':'本地测试客户'}),patch('lsp.providers.freshdesk',return_value={'id':999,'status':2,'requester_id':42}),patch('lsp.app.security.request',side_effect=media_request):
+        with patch('lsp.providers.agents',return_value=[{'id':'LOCAL_TEST_AGENT','name':'本地测试坐席'}]),patch('lsp.providers.conversation',side_effect=lambda s,cid:{'conversation_id':cid}),patch('lsp.providers.history_pages',side_effect=lambda s,cid,*args:iter([histories[cid].copy()])),patch('lsp.providers.upload',side_effect=lambda s,a,data: ({'url':'https://local-test.example/image.png'} if a['kind']=='image' else {'file_hash':'LOCAL_TEST_HASH','file_security_status':'SAFE_FILE'},'sendable')),patch('lsp.providers.send_message',side_effect=send),patch('lsp.providers.openai',side_effect=model),patch('lsp.providers.freshchat',return_value={'id':'LOCAL_TEST_CUSTOMER','first_name':'本地测试客户'}),patch('lsp.providers.freshdesk',return_value={'id':999,'status':2,'requester_id':42}),patch('lsp.app.security.request',side_effect=media_request):
             svc.start()
             print('LOCAL SYNTHETIC UI TEST ONLY http://127.0.0.1:8128 — password: LOCAL-BROWSER-TEST-ONLY',flush=True)
             serve(app,host='127.0.0.1',port=8128,threads=4)
