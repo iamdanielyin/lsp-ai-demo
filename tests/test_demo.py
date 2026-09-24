@@ -771,7 +771,8 @@ class DemoTests(unittest.TestCase):
             self.assertEqual(self.app.test_client().get(image['url']).status_code,401)
             self.assertEqual(self.client.get(image['url']).status_code,200)
             self.assertEqual(fetch.call_args.kwargs['hosts'],[host])
-        self.assertEqual(self.client.get(image['url']+'.999').status_code,404)
+        path,query=image['url'].split('?',1)
+        self.assertEqual(self.client.get(path+'.999?'+query).status_code,404)
         other=self.svc.add_conversation('other-conversation','user-2')
         self.assertEqual(self.client.get(image['url'].replace('/conversations/1/','/conversations/%s/'%other['id'])).status_code,404)
         self.svc.insert_message(self.c,normalize_message({**raw,'message_type':'private','message_parts':[{'text':{'content':'new-private-content'}}]},'conv-1'),refresh_parts=True)
@@ -872,6 +873,8 @@ class DemoTests(unittest.TestCase):
             self.assertEqual(video.data,mp4[:32])
             self.assertEqual(video.mimetype,'video/mp4')
             self.assertEqual(video.headers['Content-Range'],'bytes 0-31/'+str(len(mp4)))
+            self.assertTrue(video.cache_control.private)
+            self.assertEqual(video.headers['ETag'],self.client.get(parts[0]['url']).headers['ETag'])
             file=self.client.get(parts[1]['url'])
             self.assertEqual(file.status_code,200)
             self.assertEqual(file.data,b'# FAQ')
@@ -895,6 +898,43 @@ class DemoTests(unittest.TestCase):
                 response=self.client.get(route)
                 self.assertEqual(response.status_code,409 if error=='media_scan' else 400)
                 self.assertEqual(response.json['error'],error)
+
+    def test_media_private_cache_versions_auth_errors_and_asset_content(self):
+        host='fc-use1-00-pics-bkt-00.s3.amazonaws.com'
+        raw=self.message(message_parts=[{'image':{'url':'https://'+host+'/one.jpg'}}])
+        self.add_history(raw)
+        def url():
+            response=self.call('/api/conversations/%s/messages'%self.c['id'],'GET')
+            self.assertEqual(response.headers['Cache-Control'],'no-store')
+            return response.json['messages'][0]['parts'][0]['url']
+        first=url();self.assertEqual(first,url());self.assertIn('?v=',first)
+        with patch('lsp.app.security.request',return_value=(b'\xff\xd8\xff'+b'x'*20,{'content-type':'image/jpeg'})):
+            media=self.client.get(first)
+            self.assertEqual(media.status_code,200)
+            self.assertEqual(media.headers['Cache-Control'],'private, max-age=86400, immutable')
+            self.assertIn('Cookie',media.headers['Vary'])
+            self.assertEqual(self.client.get(first.split('?')[0]).headers['Cache-Control'],'no-store')
+        unauthorized=self.app.test_client().get(first)
+        self.assertEqual(unauthorized.status_code,401)
+        self.assertEqual(unauthorized.headers['Cache-Control'],'no-store')
+        with patch('lsp.app.security.request',side_effect=security.Problem('network_failed','读取失败',502)):
+            failed=self.client.get(first)
+            self.assertEqual(failed.status_code,502)
+            self.assertEqual(failed.headers['Cache-Control'],'no-store')
+        raw['message_parts'][0]['image']['url']='https://'+host+'/two.jpg'
+        self.svc.insert_message(self.c,normalize_message(raw,'conv-1'),refresh_parts=True)
+        second=url();self.assertNotEqual(first,second)
+        stale=self.client.get(first)
+        self.assertEqual(stale.status_code,409);self.assertEqual(stale.json['error'],'media_changed')
+        self.assertEqual(stale.headers['Cache-Control'],'no-store')
+        self.svc.settings.save({'knowledge_text':'changed configuration'})
+        self.assertNotEqual(second,url())
+        asset=self.svc.save_asset({'asset_id':'CACHE_PDF','name':'测试','purpose':'缓存检查','channels':['Webchat']},b'%PDF-1.4\n%%EOF','cache.pdf','application/pdf')
+        route='/api/assets/'+asset['id']+'/content'
+        response=self.client.get(route)
+        self.assertEqual(response.status_code,200);self.assertTrue(response.cache_control.private)
+        self.assertIn('Cookie',response.headers['Vary']);response.close()
+        self.assertEqual(self.app.test_client().get(route).headers['Cache-Control'],'no-store')
 
     def test_manual_takeover_and_partial_send_sequence(self):
         self.enable();self.webhook()

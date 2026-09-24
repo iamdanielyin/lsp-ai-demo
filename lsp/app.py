@@ -1,4 +1,5 @@
 import hmac
+import hashlib
 import io
 import json
 import os
@@ -87,6 +88,9 @@ def create_app(config=None, start_worker=True):
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
         response.headers["Cache-Control"] = "no-store"
+        if getattr(g, "cache_media", False) and response.status_code in (200, 206, 304):
+            response.headers["Cache-Control"] = "private, max-age=86400, immutable"
+            response.vary.add("Cookie")
         return response
 
     @app.errorhandler(Problem)
@@ -336,7 +340,7 @@ def create_app(config=None, start_worker=True):
         except ValueError:
             raise Problem("invalid_page", "分页参数不正确") from None
         rows = db.all("SELECT * FROM messages WHERE conversation=? ORDER BY created DESC,platform_id DESC LIMIT ? OFFSET ?", (cid, size, before))
-        s, _ = service.settings.get()
+        s, revision = service.settings.get()
         for r in rows:
             r["parts"] = display_parts(db.unseal(r["parts"]), r["actor"] != "user")
             r["role"] = "system" if r["actor"] == "system" else "private" if r["private"] else "customer" if r["actor"] == "user" else "agent"
@@ -345,9 +349,10 @@ def create_app(config=None, start_worker=True):
                 r["role"] = "ai" if own and own["origin"] == "ai" else r["role"]
             for i, part in walk_parts(r["parts"]):
                 if part["type"] in ("image", "video", "file") and "url" in part:
+                    version = media_version(part, revision)
                     part["type"] = security.media_kind(part)
                     original = part.pop("url")
-                    part["url"] = f"/api/conversations/{cid}/media/{r['id']}/{i}" if original else ""
+                    part["url"] = f"/api/conversations/{cid}/media/{r['id']}/{i}?v={version}" if original else ""
                     part["preview_note"] = "预览受来源白名单、有效期和浏览器支持限制；不能据此判定渠道发送失败"
         total = db.one("SELECT count(*) AS n,min(created) AS earliest,max(created) AS latest FROM messages WHERE conversation=?", (cid,))
         jobs = [service.public_job(r["id"]) for r in db.all("SELECT id FROM jobs WHERE conversation=? ORDER BY created DESC,seq DESC LIMIT 60", (cid,))]
@@ -445,11 +450,15 @@ def create_app(config=None, start_worker=True):
 
     @app.get("/api/assets/<aid>/content")
     def content(aid):
+        g.cache_media = True  # Asset IDs bind an immutable file version; auth runs first.
         return asset_content(service.asset(aid))
 
     @app.get("/media/<token>")
     def media(token):
         return asset_content(service.media_token(token))
+
+    def media_version(part, revision):
+        return hashlib.sha256(dump([revision, part]).encode()).hexdigest()[:24]
 
     @app.get("/api/conversations/<int:cid>/media/<int:mid>/<path:part>")
     def inbound_media(cid, mid, part):
@@ -459,7 +468,10 @@ def create_app(config=None, start_worker=True):
         parts = display_parts(db.unseal(row["parts"]), row["actor"] != "user")
         p = next((p for path, p in walk_parts(parts) if path == part), None)
         require(p and p["type"] in ("image", "video", "file"), "media_not_found", "媒体片段不存在", 404)
-        s, _ = service.settings.get()
+        s, revision = service.settings.get()
+        version = request.args.get("v")
+        require(version is None or version == media_version(p, revision), "media_changed", "媒体地址已更新，请刷新会话", 409)
+        g.cache_media = version is not None
         kind = security.media_kind(p)
         require(p.get("security_status") in (None, "", "SAFE_FILE"), "media_scan", "媒体尚未通过平台安全扫描", 409)
         media_url = p.get("url", "")
@@ -468,12 +480,13 @@ def create_app(config=None, start_worker=True):
         if security.is_freshchat_media_host(media_host):
             media_hosts.append(media_host.lower())
         raw, headers = security.request(media_url, hosts=media_hosts, redirects=3, limit=s["media_size_limits"][kind])
+        etag = hashlib.sha256(raw).hexdigest()
         filename = Path(str(p.get("name", "")).replace("\\", "/")).name
         filename = "".join(c for c in filename if c.isprintable())[:200]
         if kind == "file":
             # Unrecognized attachments are downloads only, never active inline content.
             return send_file(io.BytesIO(raw), mimetype="application/octet-stream", download_name=filename or "attachment",
-                             as_attachment=True, conditional=True)
+                             as_attachment=True, conditional=True, etag=etag)
         mime = headers.get("content-type", "").split(";")[0].strip().lower()
         if mime in ("", "application/octet-stream"):
             declared = p.get("mime", "").split(";")[0].strip().lower()
@@ -483,7 +496,7 @@ def create_app(config=None, start_worker=True):
         detected_kind, _ = security.detect_file("media" + extension, raw, mime)
         require(detected_kind == kind, "media_mime", "媒体内容与类型不一致", 409)
         return send_file(io.BytesIO(raw), mimetype=mime, download_name=filename if filename and filename != "媒体" else "media" + extension,
-                         conditional=True)
+                         conditional=True, etag=etag)
 
     @app.post("/api/webhooks/freshchat")
     def webhook():
