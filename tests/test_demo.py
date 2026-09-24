@@ -723,6 +723,49 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(next(m for m in rows if m['platform_id']=='system-event')['role'],'system')
         self.assertEqual(next(m for m in rows if m['platform_id']=='agent-note')['role'],'private')
 
+    def test_history_media_file_parts_video_range_and_attachment_download(self):
+        host='fc-use1-00-files-bkt-00.s3.amazonaws.com'
+        mp4=(Path(__file__).parent/'fixtures'/'local-video.mp4').read_bytes()
+        self.add_history(self.message(message_parts=[
+            {'file':{'url':'https://'+host+'/v','name':'指引.mp4','content_type':'application/octet-stream','file_size':len(mp4)}},
+            {'file':{'url':'https://'+host+'/f','name':'../../问题说明.md','content_type':'text/markdown'}}]))
+        parts=self.call('/api/conversations/%s/messages'%self.c['id'],'GET').json['messages'][0]['parts']
+        self.assertEqual([p['type'] for p in parts],['video','file'])
+        def fetch(url, **kwargs):
+            self.assertEqual(kwargs['hosts'],[host])
+            security.url_parts(url,kwargs['hosts'])
+            return (mp4 if url.endswith('/v') else b'# FAQ'),{'content-type':'application/octet-stream'}
+        with patch('lsp.app.security.request',side_effect=fetch):
+            self.assertEqual(self.app.test_client().get(parts[0]['url']).status_code,401)
+            video=self.client.get(parts[0]['url'],headers={'Range':'bytes=0-31'})
+            self.assertEqual(video.status_code,206)
+            self.assertEqual(video.data,mp4[:32])
+            self.assertEqual(video.mimetype,'video/mp4')
+            self.assertEqual(video.headers['Content-Range'],'bytes 0-31/'+str(len(mp4)))
+            file=self.client.get(parts[1]['url'])
+            self.assertEqual(file.status_code,200)
+            self.assertEqual(file.data,b'# FAQ')
+            self.assertEqual(file.mimetype,'application/octet-stream')
+            self.assertTrue(file.headers['Content-Disposition'].startswith('attachment;'))
+            self.assertIn("filename*=UTF-8''",file.headers['Content-Disposition'])
+            self.assertNotIn('../',file.headers['Content-Disposition'])
+
+    def test_history_media_rejects_untrusted_host_scan_failure_and_fake_video(self):
+        cases=[('https://evil.example/v.mp4',None,'host_denied'),
+               ('https://fc-use1-00-files-bkt-00.s3.amazonaws.com/v.mp4','AV_PENDING','media_scan'),
+               ('https://fc-use1-00-files-bkt-00.s3.amazonaws.com/v.mp4',None,'mime_mismatch')]
+        for i,(url,scan,error) in enumerate(cases):
+            self.add_history(self.message('unsafe-'+str(i),message_parts=[{'file':{'url':url,'name':'v.mp4','file_security_status':scan}}]))
+            parts=self.call('/api/conversations/%s/messages'%self.c['id'],'GET').json['messages']
+            route=next(m for m in parts if m['platform_id']=='unsafe-'+str(i))['parts'][0]['url']
+            def fetch(url,**kwargs):
+                security.url_parts(url,kwargs['hosts'])
+                return b'<html>not a video</html>',{'content-type':'video/mp4'}
+            with self.subTest(error=error),patch('lsp.app.security.request',side_effect=fetch):
+                response=self.client.get(route)
+                self.assertEqual(response.status_code,409 if error=='media_scan' else 400)
+                self.assertEqual(response.json['error'],error)
+
     def test_manual_takeover_and_partial_send_sequence(self):
         self.enable();self.webhook()
         result=self.svc.manual_send(self.c['id'],[self.text('one'),self.text('two'),self.text('three')])

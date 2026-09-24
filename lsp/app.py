@@ -334,6 +334,7 @@ def create_app(config=None, start_worker=True):
                 r["role"] = "ai" if own and own["origin"] == "ai" else r["role"]
             for i, part in enumerate(r["parts"]):
                 if "url" in part:
+                    part["type"] = security.media_kind(part)
                     original = part.pop("url")
                     part["url"] = f"/api/conversations/{cid}/media/{r['id']}/{i}" if original else ""
                     part["preview_note"] = "预览受来源白名单、有效期和浏览器支持限制；不能据此判定渠道发送失败"
@@ -446,17 +447,30 @@ def create_app(config=None, start_worker=True):
         require(0 <= part < len(parts) and parts[part]["type"] in ("image", "video", "file"), "media_not_found", "媒体片段不存在", 404)
         p = parts[part]
         s, _ = service.settings.get()
+        kind = security.media_kind(p)
+        require(p.get("security_status") in (None, "", "SAFE_FILE"), "media_scan", "媒体尚未通过平台安全扫描", 409)
         media_url = p.get("url", "")
-        media_host = urlsplit(media_url).hostname or ""
+        media_host = security.url_parts(media_url).hostname
         media_hosts = list(s["media_host_allowlist"])
         if security.is_freshchat_media_host(media_host):
             media_hosts.append(media_host.lower())
-        raw, headers = security.request(media_url, hosts=media_hosts, redirects=3, limit=s["media_size_limits"][p["type"]])
-        mime = headers.get("content-type", "").split(";")[0]
+        raw, headers = security.request(media_url, hosts=media_hosts, redirects=3, limit=s["media_size_limits"][kind])
+        filename = Path(str(p.get("name", "")).replace("\\", "/")).name
+        filename = "".join(c for c in filename if c.isprintable())[:200]
+        if kind == "file":
+            # Unrecognized attachments are downloads only, never active inline content.
+            return send_file(io.BytesIO(raw), mimetype="application/octet-stream", download_name=filename or "attachment",
+                             as_attachment=True, conditional=True)
+        mime = headers.get("content-type", "").split(";")[0].strip().lower()
+        if mime in ("", "application/octet-stream"):
+            declared = p.get("mime", "").split(";")[0].strip().lower()
+            mime = declared if declared not in ("", "application/octet-stream") else security.MIMES.get(Path(filename).suffix.lower(), ("", ""))[1]
         require(mime in s["allowed_mime_types"], "media_mime", "媒体 MIME 不允许在管理页打开", 409)
         extension = {"image/png": ".png", "image/jpeg": ".jpg", "video/mp4": ".mp4", "application/pdf": ".pdf"}[mime]
-        security.detect_file("media" + extension, raw, mime)
-        return send_file(io.BytesIO(raw), mimetype=mime, download_name="media" + extension, as_attachment=p["type"] == "file")
+        detected_kind, _ = security.detect_file("media" + extension, raw, mime)
+        require(detected_kind == kind, "media_mime", "媒体内容与类型不一致", 409)
+        return send_file(io.BytesIO(raw), mimetype=mime, download_name=filename if filename and filename != "媒体" else "media" + extension,
+                         conditional=True)
 
     @app.post("/api/webhooks/freshchat")
     def webhook():

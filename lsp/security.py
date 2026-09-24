@@ -7,6 +7,7 @@ import re
 import socket
 import ssl
 import uuid
+from pathlib import Path
 from urllib.parse import urlsplit, urljoin
 
 from cryptography.hazmat.primitives import hashes, serialization
@@ -184,11 +185,22 @@ MIMES = {".png": ("image", "image/png"), ".jpg": ("image", "image/jpeg"),
 def is_freshchat_media_host(host):
     """Recognize Freshchat's generated public S3 media hosts only."""
     return bool(isinstance(host, str) and re.fullmatch(
-        r"fc-[a-z0-9-]+-pics-bkt-[a-z0-9-]+\.s3(?:[.-][a-z0-9-]+)?\.amazonaws\.com", host.lower()))
+        r"fc-[a-z0-9-]+-(?:pics|files|audio)-bkt-[a-z0-9-]+\.s3(?:[.-][a-z0-9-]+)?\.amazonaws\.com", host.lower()))
+
+
+def media_kind(part):
+    """Freshchat also represents uploaded pictures/videos as file parts."""
+    if part["type"] == "file":
+        mime = part.get("mime", "").split(";")[0].strip().lower()
+        for kind, supported_mime in MIMES.values():
+            if mime == supported_mime:
+                return kind
+        if mime in ("", "application/octet-stream"):
+            return MIMES.get(Path(part.get("name", "")).suffix.lower(), ("file", ""))[0]
+    return part["type"]
 
 
 def detect_file(filename, data, claimed_mime=""):
-    from pathlib import Path
     ext = Path(filename).suffix.lower()
     require(ext in MIMES, "file_type", "仅支持 PNG、JPEG、MP4、PDF")
     kind, mime = MIMES[ext]

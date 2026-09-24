@@ -10,10 +10,11 @@ const labels = {inbound:'入站事件',history:'原会话历史',manual_text:'�
 const states = {not_tested:'未测试',passed:'通过',failed:'失败',blocked:'受阻',unsupported:'不支持',queued:'排队',generating:'处理中',processing:'索引中',ready:'可用',deleting:'删除中',pending:'待发送',sending:'发送中',accepted:'平台已受理',delivered:'回执确认送达',unknown:'结果不明',cancelled:'已取消',completed:'已完成',paused:'已暂停',pending_upload:'待上传',scanning:'扫描中',sendable:'可发送',disabled:'已停用'};
 const roleNames = {customer:'客户',agent:'人工坐席',ai:'AI 助理',system:'系统记录',private:'私有备注'};
 const fmtTime = v => v ? new Date(typeof v === 'number' ? v * 1000 : v).toLocaleString('zh-CN', {hour12:false}) : '—';
-const bytes = n => n ? (n / 1000000).toFixed(2) + ' MB' : '大小未知';
+const bytes = n => Number.isFinite(Number(n)) && Number(n)>0 ? (n>=1000000?(n/1000000).toFixed(2)+' MB':n>=1000?(n/1000).toFixed(1)+' KB':Number(n)+' B') : '';
 const pill = (state, text) => `<span class="pill ${['passed','sendable','completed','accepted','ready'].includes(state)?'good':['failed','unknown'].includes(state)?'bad':['blocked','scanning','paused','processing','deleting'].includes(state)?'warn':''}"><span class="dot"></span>${esc(text || states[state] || state)}</span>`;
 const S = {csrf:'', settings:null, assets:[], knowledge:null, conversations:[], selected:Number(new URLSearchParams(location.search).get('conversation'))||null, detail:null, drafts:[], limit:50, page:location.pathname === '/settings' ? 'settings' : 'conversations', poll:null, dirty:false, uploading:false, sending:false};
 let toastTimer;
+let mediaViewer;
 function toast(message, error=false) { const node=$('#toast');node.textContent=message;node.className='show'+(error?' error':'');clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.className='',6500); }
 async function api(path, options={}) {
   const headers={'X-CSRF-Token':S.csrf,...options.headers};
@@ -45,6 +46,7 @@ async function boot() {
   clearInterval(S.poll);S.poll=setInterval(async()=>{if(!$('#dialog').open){try{if(S.page==='conversations')await refreshConversations();else await refreshDiscovery();}catch(e){toast(e.message,true);}}},3000);
 }
 function login() {
+  mediaViewer?.close();
   $('#app').innerHTML=`<main class="login-page"><section class="login-story"><div class="brand"><img src="/static/favicon.svg" alt="LSP"><div>LSP<span> · AI</span><small>CUSTOMER CONNECTION LAB</small></div></div><div><div class="eyebrow">FRESHDESK OMNI × OPENAI</div><h1>让每一次回复，<br>回到原来的对话。</h1><p>在真实渠道中验证 AI 客服的完整流程。连接会话、读取上下文，再把经过审核的回复送回客户。</p><div class="login-flow"><span>客户原渠道</span>→<span>Omni 会话</span>→<span>AI service</span></div></div><footer>LSP / INTEGRATION DEMO · 2026</footer></section><section class="login-main"><form class="login-form" id="login-form"><div class="eyebrow">ADMIN WORKSPACE</div><h2>进入验证工作台</h2><p class="muted">使用部署时创建的管理员口令登录。<br>所有业务配置均在设置页完成。</p><label for="password">管理员口令</label><input type="password" id="password" name="password" autocomplete="current-password" required placeholder="请输入管理员口令"><p class="error-text" id="login-error" role="alert"></p><button class="primary" type="submit">登录工作台 →</button><p class="login-note">当前实现：Freshchat API 路线<br>租户与渠道能力需通过真实接口逐项验证。</p></form></section></main>`;
   bind($('#login-form'),'submit',async e=>{e.preventDefault();const b=$('button',e.target);b.disabled=true;try{await api('/api/login',{method:'POST',body:{password:$('#password').value}});$('#password').value='';await boot();}catch(error){$('#login-error').textContent=error.message;}finally{b.disabled=false;}});
 }
@@ -55,6 +57,7 @@ function shell() {
 }
 window.addEventListener('popstate',async()=>{S.page=location.pathname==='/settings'?'settings':'conversations';await renderPage();});
 async function renderPage() {
+  mediaViewer?.close();
   $$('[data-nav]').forEach(a=>a.classList.toggle('active',a.dataset.nav===S.page));
   $('#breadcrumb-page').textContent=S.page==='settings'?'集中设置':'消息验证';
   $('#page').classList.toggle('im-page',S.page==='conversations');
@@ -306,13 +309,33 @@ async function uploadAttachment(input) {
     }
   } finally {S.uploading=false;$$('.pick-attachment,#send-message').forEach(el=>el.disabled=S.sending);if($('#composer-status'))$('#composer-status').textContent='Enter 发送 · Shift + Enter 换行';}
 }
+function mediaHTML(p) {
+  const name=p.name&&p.name!=='媒体'?p.name:'';
+  const meta=[name,bytes(p.size)].filter(Boolean).join(' · ');
+  if(!p.url)return `<span>${esc(name||labels[p.type]||'附件')} · 暂无可用地址</span>`;
+  if(p.type==='image'||p.type==='video')return `<button type="button" class="chat-media" data-media-type="${p.type}" data-url="${esc(p.url)}" data-name="${esc(name)}" aria-label="放大查看${p.type==='image'?'图片':'视频'}${name?'：'+esc(name):''}">${p.type==='image'?`<img class="media-preview" loading="lazy" src="${esc(p.url)}" alt="${esc(name||'聊天图片')}">`:`<video class="media-preview" muted playsinline preload="metadata" src="${esc(p.url)}"></video><span class="media-play">▶ 播放视频</span>`}</button>${meta?`<small>${esc(meta)}</small>`:''}`;
+  return `<a class="attachment" href="${esc(p.url)}" download>↓ ${esc(name||'下载附件')}${bytes(p.size)?' · '+esc(bytes(p.size)):''}</a>`;
+}
+function openMedia(button) {
+  const type=button.dataset.mediaType,url=button.dataset.url;
+  if(type==='image'&&$('img',button)?.complete&&!$('img',button).naturalWidth){toast('图片暂时无法加载，请检查媒体来源或链接有效期。',true);return;}
+  const video=type==='video'?document.createElement('video'):null;
+  if(video){video.src=url;video.controls=true;video.playsInline=true;video.preload='metadata';video.className='viewer-video';video.tabIndex=0;video.setAttribute('aria-label',button.dataset.name||'视频播放');}
+  mediaViewer=GLightbox({selector:null,elements:[video?{content:video,type:'inline',width:'92vw',height:'auto',draggable:false}:{href:url,type:'image',alt:button.dataset.name||'聊天图片'}],openEffect:'none',closeEffect:'none',autoplayVideos:false,
+    onOpen:()=>{const modal=$('.glightbox-container'),close=$('.gclose',modal);modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label','媒体预览');close.setAttribute('aria-label','关闭媒体预览');$('#app').inert=true;close.focus();
+      $('img,video',modal)?.addEventListener('error',()=>{mediaViewer?.close();toast('媒体暂时无法加载，请检查链接有效期或文件格式。',true);},{once:true});
+      modal.addEventListener('keydown',e=>{if(e.key==='Tab'){e.preventDefault();e.stopPropagation();(video&&document.activeElement===close?video:close).focus();}});
+      if(video)video.play().catch(()=>{});
+    },
+    onClose:()=>{if(video){video.pause();video.removeAttribute('src');video.load();}$('#app').inert=false;(button.isConnected?button:$('#message-text'))?.focus({preventScroll:true});mediaViewer=null;}
+  });
+  mediaViewer.open();
+}
+document.addEventListener('click',e=>{const button=e.target.closest('.chat-media');if(button)openMedia(button);});
 function messageHTML(m) {
   return `<article class="message ${esc(m.role)}" title="消息 ID：${esc(m.platform_id)}"><div class="message-meta"><strong>${roleNames[m.role]||m.actor}</strong><span>${fmtTime(m.created)}</span></div><div class="bubble">${m.parts.map(p=>{
     if(p.type==='text'||p.type==='unsupported')return esc(p.text);
-    if(!p.url)return `<span>${esc(p.type)}：${esc(p.name)} · 无可用预览地址</span>`;
-    if(p.type==='image')return `<img class="media-preview" loading="lazy" src="${esc(p.url)}" alt="客户或平台图片"><small>${esc(p.name)} · ${bytes(p.size)}</small>`;
-    if(p.type==='video')return `<video class="media-preview" controls preload="none" src="${esc(p.url)}"></video><small>${esc(p.name)} · ${bytes(p.size)}</small>`;
-    return `<a class="attachment" href="${esc(p.url)}">↓ ${esc(p.name)} · ${bytes(p.size)}<small>${esc(p.mime)}</small></a>`;
+    return mediaHTML(p);
   }).join('')}<small class="media-fallback hidden">预览受来源白名单、链接有效期或浏览器限制；不代表客户发送失败。</small></div></article>`;
 }
 function updateThread(scroll=false) {
@@ -324,7 +347,7 @@ function updateThread(scroll=false) {
   const thread=$('#thread');if(!thread)return;const nearBottom=thread.scrollHeight-thread.scrollTop-thread.clientHeight<80;
   const visibleIds=new Set(d.messages.map(m=>m.platform_id));
   const outgoing=d.jobs.filter(j=>j.kind==='send'&&j.state!=='cancelled'&&!visibleIds.has(j.platform_id)&&(!d.earliest||j.created*1000>=Date.parse(d.earliest))).sort((a,b)=>a.created-b.created||a.seq-b.seq);
-  const content=(d.next_before!==null?'<button class="small" id="load-earlier">加载更早消息</button>':'')+d.messages.map(messageHTML).join('')+outgoing.map(j=>`<article class="message agent outgoing"><div class="message-meta"><strong>${j.origin==='ai'?'AI 助理':'人工坐席'}</strong><span>${fmtTime(j.created)}</span></div><div class="bubble">${esc(j.payload.type==='text'?j.payload.text:(labels[j.payload.type]+' · '+(S.assets.find(a=>a.id===j.payload.asset_id)?.name||'附件')))}</div><small class="${['failed','unknown','paused'].includes(j.state)?'error-text':''}">${esc(states[j.state]||j.state)}${j.error?' · '+esc(j.error):''}</small></article>`).join('');
+  const content=(d.next_before!==null?'<button class="small" id="load-earlier">加载更早消息</button>':'')+d.messages.map(messageHTML).join('')+outgoing.map(j=>{const a=S.assets.find(a=>a.id===j.payload.asset_id);return `<article class="message agent outgoing"><div class="message-meta"><strong>${j.origin==='ai'?'AI 助理':'人工坐席'}</strong><span>${fmtTime(j.created)}</span></div><div class="bubble">${j.payload.type==='text'?esc(j.payload.text):mediaHTML({type:j.payload.type,url:a?.preview_url,name:a?.filename||a?.name,size:a?.size})}</div><small class="${['failed','unknown','paused'].includes(j.state)?'error-text':''}">${esc(states[j.state]||j.state)}${j.error?' · '+esc(j.error):''}</small></article>`;}).join('');
   if(thread.dataset.signature!==content){thread.innerHTML=content;thread.dataset.signature=content;if(scroll||nearBottom)thread.scrollTop=thread.scrollHeight;buttonAction($('#load-earlier'),async()=>{if(S.limit>=100){const older=await api('/api/conversations/'+S.selected+'/messages?before='+d.next_before+'&limit=100');S.detail.messages=[...older.messages,...d.messages];S.detail.next_before=older.next_before;updateThread();}else {S.limit=100;await refreshConversations();}});
     $$('.media-preview',thread).forEach(el=>el.addEventListener('error',()=>{const note=$('.media-fallback',el.closest('.bubble'));if(note)note.classList.remove('hidden');}));}
 }
