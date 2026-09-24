@@ -181,6 +181,12 @@ MIMES = {".png": ("image", "image/png"), ".jpg": ("image", "image/jpeg"),
          ".jpeg": ("image", "image/jpeg"), ".mp4": ("video", "video/mp4"), ".pdf": ("file", "application/pdf")}
 
 
+def is_freshchat_media_host(host):
+    """Recognize Freshchat's generated public S3 media hosts only."""
+    return bool(isinstance(host, str) and re.fullmatch(
+        r"fc-[a-z0-9-]+-pics-bkt-[a-z0-9-]+\.s3(?:[.-][a-z0-9-]+)?\.amazonaws\.com", host.lower()))
+
+
 def detect_file(filename, data, claimed_mime=""):
     from pathlib import Path
     ext = Path(filename).suffix.lower()

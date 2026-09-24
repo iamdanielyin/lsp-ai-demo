@@ -328,7 +328,7 @@ def create_app(config=None, start_worker=True):
         s, _ = service.settings.get()
         for r in rows:
             r["parts"] = db.unseal(r["parts"])
-            r["role"] = "private" if r["private"] else "customer" if r["actor"] == "user" else "system" if r["actor"] == "system" else "agent"
+            r["role"] = "system" if r["actor"] == "system" else "private" if r["private"] else "customer" if r["actor"] == "user" else "agent"
             if r["actor_id"] == s["reply_actor_id"]:
                 own = db.one("SELECT origin FROM jobs WHERE tenant=? AND conversation=? AND platform_id=? AND kind='send'", (c["tenant"], cid, r["platform_id"]))
                 r["role"] = "ai" if own and own["origin"] == "ai" else r["role"]
@@ -446,7 +446,12 @@ def create_app(config=None, start_worker=True):
         require(0 <= part < len(parts) and parts[part]["type"] in ("image", "video", "file"), "media_not_found", "媒体片段不存在", 404)
         p = parts[part]
         s, _ = service.settings.get()
-        raw, headers = security.request(p.get("url", ""), hosts=s["media_host_allowlist"], redirects=3, limit=s["media_size_limits"][p["type"]])
+        media_url = p.get("url", "")
+        media_host = urlsplit(media_url).hostname or ""
+        media_hosts = list(s["media_host_allowlist"])
+        if security.is_freshchat_media_host(media_host):
+            media_hosts.append(media_host.lower())
+        raw, headers = security.request(media_url, hosts=media_hosts, redirects=3, limit=s["media_size_limits"][p["type"]])
         mime = headers.get("content-type", "").split(";")[0]
         require(mime in s["allowed_mime_types"], "media_mime", "媒体 MIME 不允许在管理页打开", 409)
         extension = {"image/png": ".png", "image/jpeg": ".jpg", "video/mp4": ".mp4", "application/pdf": ".pdf"}[mime]

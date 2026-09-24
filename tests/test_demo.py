@@ -703,6 +703,26 @@ class DemoTests(unittest.TestCase):
         self.assertTrue(media['parts'][0]['url'].startswith('/api/conversations/'))
         self.assertEqual(next(m for m in response['messages'] if m['platform_id']=='private')['role'],'private')
 
+    def test_freshchat_media_proxy_allows_platform_s3_and_keeps_unknown_hosts_blocked(self):
+        msg=self.message(message_parts=[{'image':{'url':'https://fc-use1-00-pics-bkt-00.s3.amazonaws.com/a.jpg','content_type':'image/jpeg'}}])
+        self.webhook(self.event(msg))
+        media_url=self.call('/api/conversations/%s/messages'%self.c['id'],'GET').json['messages'][0]['parts'][0]['url']
+        with patch('lsp.app.security.request',return_value=(b'\xff\xd8\xff'+b'x'*20,{'content-type':'image/jpeg'})):
+            response=self.client.get(media_url)
+        self.assertEqual(response.status_code,200)
+        with patch('lsp.app.security.request',side_effect=security.Problem('host_denied','目标主机不在允许列表中')):
+            response=self.client.get(media_url)
+        self.assertEqual(response.status_code,400)
+        self.assertTrue(security.is_freshchat_media_host('fc-use1-00-pics-bkt-00.s3.amazonaws.com'))
+        self.assertFalse(security.is_freshchat_media_host('evil-bucket.s3.amazonaws.com'))
+
+    def test_system_events_are_not_labeled_private_notes(self):
+        self.add_history(self.message('system-event','system',private=True))
+        self.add_history(self.message('agent-note','agent',private=True))
+        rows=self.call('/api/conversations/%s/messages'%self.c['id'],'GET').json['messages']
+        self.assertEqual(next(m for m in rows if m['platform_id']=='system-event')['role'],'system')
+        self.assertEqual(next(m for m in rows if m['platform_id']=='agent-note')['role'],'private')
+
     def test_manual_takeover_and_partial_send_sequence(self):
         self.enable();self.webhook()
         result=self.svc.manual_send(self.c['id'],[self.text('one'),self.text('two'),self.text('three')])

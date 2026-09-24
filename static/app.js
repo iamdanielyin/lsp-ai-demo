@@ -8,7 +8,7 @@ const icons = {
 };
 const labels = {inbound:'入站事件',history:'原会话历史',manual_text:'手动文本',image:'图片',video:'视频',file:'附件',ai_text:'AI 自动文本',ai_media:'AI 自动媒体',omni_visible:'工作台显示',ticket:'Ticket',quote_bubble:'引用气泡',openai:'OpenAI',platform_read:'平台读取'};
 const states = {not_tested:'未测试',passed:'通过',failed:'失败',blocked:'受阻',unsupported:'不支持',queued:'排队',generating:'处理中',processing:'索引中',ready:'可用',deleting:'删除中',pending:'待发送',sending:'发送中',accepted:'平台已受理',delivered:'回执确认送达',unknown:'结果不明',cancelled:'已取消',completed:'已完成',paused:'已暂停',pending_upload:'待上传',scanning:'扫描中',sendable:'可发送',disabled:'已停用'};
-const roleNames = {customer:'客户',agent:'人工坐席',ai:'AI 助理',system:'系统',private:'私有备注'};
+const roleNames = {customer:'客户',agent:'人工坐席',ai:'AI 助理',system:'系统记录',private:'私有备注'};
 const fmtTime = v => v ? new Date(typeof v === 'number' ? v * 1000 : v).toLocaleString('zh-CN', {hour12:false}) : '—';
 const bytes = n => n ? (n / 1000000).toFixed(2) + ' MB' : '大小未知';
 const pill = (state, text) => `<span class="pill ${['passed','sendable','completed','accepted','ready'].includes(state)?'good':['failed','unknown'].includes(state)?'bad':['blocked','scanning','paused','processing','deleting'].includes(state)?'warn':''}"><span class="dot"></span>${esc(text || states[state] || state)}</span>`;
