@@ -12,7 +12,7 @@
 | 加密与签名 | cryptography 48.0.1 | Fernet配置/内容加密、RSA-SHA256验签；Werkzeug提供密码哈希 |
 | 前端 | 原生HTML、CSS、JavaScript | 单页壳，设置/消息两个路由；同源fetch、3秒轮询，无npm运行依赖 |
 | 供应商请求 | 标准库http.client、ssl、socket | 公网DNS检查、固定验证IP连接、TLS主机校验、超时及响应大小限制 |
-| 模型 | OpenAI Responses HTTP API | 自带历史上下文、严格JSON Schema、store=false；支持管理员配置兼容地址 |
+| 模型 / 知识库 | OpenAI Responses HTTP API + Files/Vector Stores | Responses 严格JSON Schema、store=false；知识库使用 `file_search`，支持管理员配置兼容地址 |
 | 单测 | unittest、unittest.mock、临时SQLite | 不读取真实业务配置，阻止意外供应商网络 |
 | UI验证 | 环境已有agent-browser / Chrome | 独立合成测试实例，无需项目自动安装浏览器；证据见验收报告 |
 
@@ -28,8 +28,8 @@
 | [lsp/settings.py](../lsp/settings.py) | DEFAULTS/BOUNDS、字段验证、密钥掩码、配置版本、能力门槛 |
 | [lsp/store.py](../lsp/store.py) | SQLite表结构、事务嵌套复用、加解密、审计写入 |
 | [lsp/security.py](../lsp/security.py) | URL/ID校验、公网DNS与TLS连接、固定错误、签名与文件校验 |
-| [lsp/providers.py](../lsp/providers.py) | Freshchat历史/发送/上传、Freshdesk请求、Responses上下文/schema/输出解析 |
-| [lsp/service.py](../lsp/service.py) | 入站/测试码/历史/AI/人工/素材/工单/任务/恢复/清理的业务流程 |
+| [lsp/providers.py](../lsp/providers.py) | Freshchat历史/发送/上传、Freshdesk请求、OpenAI Responses/Files/Vector Stores |
+| [lsp/service.py](../lsp/service.py) | 入站/测试码/历史/AI/知识库/人工/素材/工单/任务/恢复/清理的业务流程 |
 | [templates/index.html](../templates/index.html) | 页面壳与对话框挂载点 |
 | [static/app.js](../static/app.js) | 登录、设置、测试账号开关、消息/任务、素材、工单、能力矩阵 |
 | [static/app.css](../static/app.css)、[favicon.svg](../static/favicon.svg) | 样式、响应式和图标 |
@@ -50,6 +50,8 @@ flowchart LR
     D --> Q[单worker读取有界队列]
     Q -->|分页读取同会话历史| O
     Q -->|结构化计划| A[Responses API]
+    Q -->|file_search| K[OpenAI Vector Store]
+    K --> A
     A --> Q
     Q -->|逐条发送到原会话| O
     O --> C
@@ -70,6 +72,8 @@ Webhook验签和事务完成后返回，不等待模型或平台外发。选定�
 | `messages` | 平台消息ID、角色/时间/私有标记、加密parts；唯一tenant+conversation+platform_id |
 | `events` | 事件去重、载荷版本、重试次数；唯一tenant+conversation+message+action |
 | `assets` | 逻辑ID、版本、文件路径/MIME/大小、渠道、启用状态、加密平台引用 |
+| `knowledge_bases` | 当前租户的 OpenAI Vector Store ID、状态和脱敏错误 |
+| `knowledge_files` | OpenAI File ID、文件名/MIME/大小、索引状态和脱敏错误 |
 | `jobs` | 类型、状态、配置版本、触发ID、batch/seq、尝试/时间、加密计划与结果；唯一batch+seq |
 | `tickets` | 本地会话与事项到真实工单映射；唯一tenant+conversation+matter |
 | `checks` | 版本与渠道维度能力状态、测试对象、加密证据和时间 |
@@ -78,7 +82,7 @@ Webhook验签和事务完成后返回，不等待模型或平台外发。选定�
 
 tenant指纹由平台地址和Token计算；轮换平台凭证也要求重新导入和验证。不是完整多租户SaaS。加密保护选定字段，ID索引元数据和磁盘媒体不是整库加密；部署另行保护磁盘与备份。不同渠道的用户ID不自动合并，即使同人拥有两个账号。
 
-历史初始化遍历到空页，重复页视为错误；增量游标来自最后成功API同步，不从最新Webhook消息推断。模型上下文另做保守预算截断，内部备注不进入模型。
+历史初始化遍历到空页，重复页视为错误；增量游标来自最后成功API同步，不从最新Webhook消息推断。模型上下文另做保守预算截断，内部备注不进入模型。知识库无文件引用时当前 AI 会话转为人工并记录原因。
 
 ## 任务处理与外发边界
 
@@ -119,6 +123,8 @@ tenant指纹由平台地址和Token计算；轮换平台凭证也要求重新导
 | `PUT /api/conversations/{id}/mode` | mode=manual/auto/off；自动模式仍检查当前授权 |
 | `POST /api/conversations/{id}/ai-preview` | 兼容旧接口；正常消息流程不需要预览，开启 AI 后直接生成并发送 |
 | `POST /api/conversations/{id}/ticket` | reason及new_matter；创建或复用事项工单任务 |
+| `GET/POST/DELETE /api/knowledge` | 查看、创建或删除当前租户 OpenAI Vector Store |
+| `POST /api/knowledge/files`、`DELETE /api/knowledge/files/{id}` | 上传/删除知识库文档；支持 DOCX/PDF/TXT/Markdown/CSV/JSON |
 | `GET /api/jobs/{job_id}` | 当前租户脱敏任务状态、计划、错误和结果 |
 | `POST /api/jobs/{job_id}/resolve` | action=cancel/retry/link_existing，要求核实证据；retry需ack_duplicate_risk |
 | `GET/POST /api/assets` | 素材列表、新版本；本地multipart file+metadata，或JSON审核url |
@@ -136,7 +142,7 @@ tenant指纹由平台地址和Token计算；轮换平台凭证也要求重新导
 
 Freshchat：`GET /v2/agents`、`GET /v2/conversations/{platform_id}`、`GET .../messages`、`GET /v2/users/{user_id}/conversations`、`POST .../messages`、`POST /v2/images/upload`、`POST /v2/files/upload`。消息外层normal/agent/真实actor_id，多条独立回复逐条POST。无自造 `/videos/upload`。
 
-Freshdesk：Basic `<API_KEY>:X`，跟进建单 `POST /api/v2/tickets`，读真实Ticket用于核实关联；不包含新版Omni公开会话回复适配。OpenAI：配置地址的Responses端点、Bearer、可选Project/Organization Header、严格schema及store=false。
+Freshdesk：Basic `<API_KEY>:X`，跟进建单 `POST /api/v2/tickets`，读真实Ticket用于核实关联；不包含新版Omni公开会话回复适配。OpenAI：配置地址的Responses端点、Bearer、可选Project/Organization Header、严格schema及store=false；知识库额外使用 Files、Vector Stores 及 Responses `file_search`。
 
 具体契约、官方依据与未实测点见 [API依据](api-evidence.md)。这些路径在代码中存在不等于实际租户或连接器已支持。
 

@@ -3,9 +3,9 @@
   "date": "2026-09-24",
   "unit_tests": {
     "command": ".venv/bin/python -m unittest discover -s tests -v",
-    "passed": 91,
+    "passed": 93,
     "failed": 0,
-    "duration_seconds": 15.599
+    "duration_seconds": 16.263
   },
   "syntax": [
     "python compileall passed",
@@ -274,5 +274,14 @@
     "chat_messages_sent_by_verification": 0,
     "browser_scope": "isolated_local_stub_create_and_reuse_with_empty_mapping",
     "identifiers": "retained_only_in_local_database"
+  },
+  "knowledge_base": {
+    "status": "local_synthetic_passed",
+    "checks": [
+      "Vector Store create/upload/delete lifecycle",
+      "DOCX/PDF/TXT/Markdown/CSV/JSON validation",
+      "Responses file_search request and no-hit human handoff"
+    ],
+    "real_openai_tenant": "not_tested"
   }
 }

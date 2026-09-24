@@ -15,6 +15,17 @@ from .settings import Settings, tenant_id, test_identity_allowed
 from .store import dump
 
 
+KNOWLEDGE_TYPES = {
+    ".docx": ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"),
+    ".pdf": ("application/pdf", "pdf"),
+    ".txt": ("text/plain", "text"),
+    ".md": ("text/markdown", "markdown"),
+    ".csv": ("text/csv", "csv"),
+    ".json": ("application/json", "json"),
+}
+KNOWLEDGE_MAX_BYTES = 20_000_000
+
+
 def utc():
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
@@ -176,8 +187,8 @@ class Service:
                 self.save_discovery(state)
                 for row in self.db.all("SELECT id FROM conversations WHERE tenant=? AND user_id=? AND channel=?", (c["tenant"], c["user_id"], c["channel"])):
                     self.cancel_ai(row["id"], "测试账号已切换 AI / 人工模式")
-                self.db.run("UPDATE conversations SET mode=?,auto_since=?,updated=? WHERE tenant=? AND user_id=? AND channel=?", (mode, utc(), time.time(), c["tenant"], c["user_id"], c["channel"]))
-            self.db.run("UPDATE conversations SET mode=?,auto_since=?,updated=? WHERE id=?", (mode, utc(), time.time(), cid))
+            self.db.run("UPDATE conversations SET mode=?,auto_since=?,handoff_reason=CASE WHEN ?='auto' THEN '' ELSE handoff_reason END,handoff_at=CASE WHEN ?='auto' THEN NULL ELSE handoff_at END,updated=? WHERE tenant=? AND user_id=? AND channel=?", (mode, utc(), mode, mode, time.time(), c["tenant"], c["user_id"], c["channel"]))
+            self.db.run("UPDATE conversations SET mode=?,auto_since=?,handoff_reason=CASE WHEN ?='auto' THEN '' ELSE handoff_reason END,handoff_at=CASE WHEN ?='auto' THEN NULL ELSE handoff_at END,updated=? WHERE id=?", (mode, utc(), mode, mode, time.time(), cid))
             inflight = self.db.one("SELECT count(*) AS n FROM jobs WHERE conversation=? AND state='sending'", (cid,))["n"]
             return {"mode": mode, "inflight": inflight, "message": ("本会话 AI 已开启" if mode == "auto" else "本会话已关闭 AI，当前仅人工回复") + f"；已取消待发送任务，另有 {inflight} 条已提交请求无法撤回"}
 
@@ -557,6 +568,126 @@ class Service:
         a["channels"], a["tags"] = json.loads(a["channels"]), json.loads(a["tags"])
         return a
 
+    def public_knowledge(self):
+        s, _ = self.settings.get()
+        tenant = tenant_id(s)
+        base = self.db.one("SELECT id,vector_store_id,name,state,error,created,updated FROM knowledge_bases WHERE tenant=?", (tenant,))
+        files = self.db.all("SELECT id,openai_file_id,filename,mime,size,state,error,created,updated FROM knowledge_files WHERE tenant=? ORDER BY id DESC", (tenant,))
+        return {"knowledge_base": base, "files": files}
+
+    def create_knowledge(self, name="LSP Demo Knowledge Base"):
+        s, _ = self.settings.get()
+        require(s["openai_api_key"], "openai_not_configured", "请先配置 OpenAI API Key", 409)
+        name = str(name or "LSP Demo Knowledge Base").strip()
+        require(1 <= len(name) <= 200, "knowledge_name", "知识库名称长度须为1到200字符")
+        tenant = tenant_id(s)
+        existing = self.db.one("SELECT id,vector_store_id,name,state,error,created,updated FROM knowledge_bases WHERE tenant=?", (tenant,))
+        if existing:
+            return existing
+        remote = providers.openai_create_vector_store(s, name)
+        now = time.time()
+        self.db.run("INSERT INTO knowledge_bases(tenant,vector_store_id,name,state,error,created,updated) VALUES(?,?,?,?,?,?,?)",
+                    (tenant, remote["id"], name, "ready", "", now, now))
+        self.db.log(tenant, None, "knowledge_created", "知识库已创建")
+        return self.db.one("SELECT id,vector_store_id,name,state,error,created,updated FROM knowledge_bases WHERE tenant=?", (tenant,))
+
+    def _knowledge_type(self, filename, data, claimed_mime):
+        suffix = Path(filename).suffix.lower()
+        require(suffix in KNOWLEDGE_TYPES, "knowledge_file_type", "仅支持 DOCX、PDF、TXT、Markdown、CSV 或 JSON")
+        require(isinstance(data, bytes) and 1 <= len(data) <= KNOWLEDGE_MAX_BYTES, "knowledge_file_limit", "知识文档不能为空且不得超过20MB")
+        expected, kind = KNOWLEDGE_TYPES[suffix]
+        actual = (claimed_mime or "").split(";", 1)[0].lower()
+        if suffix == ".pdf":
+            valid = data.startswith(b"%PDF-")
+        elif suffix == ".docx":
+            valid = data.startswith(b"PK")
+        else:
+            valid = b"\x00" not in data
+            if valid:
+                try:
+                    data.decode("utf-8")
+                except UnicodeDecodeError:
+                    valid = False
+        require(valid, "knowledge_file_format", "文件扩展名与内容格式不匹配，或文件不是有效 UTF-8 文本")
+        require(not actual or actual in (expected, "application/octet-stream", ""), "knowledge_mime", "文件 MIME 与扩展名不匹配")
+        return expected, kind
+
+    def upload_knowledge_file(self, data, filename, claimed_mime):
+        s, _ = self.settings.get()
+        mime, _ = self._knowledge_type(filename, data, claimed_mime)
+        base = self.create_knowledge()
+        tenant = tenant_id(s)
+        remote = None
+        try:
+            remote = providers.openai_upload_file(s, Path(filename).name[:200], mime, data)
+            attached = providers.openai_attach_file(s, base["vector_store_id"], remote["id"])
+        except Problem as error:
+            if remote:
+                try:
+                    providers.openai_delete_file(s, remote["id"])
+                except Problem:
+                    pass
+            self.db.log(tenant, None, "knowledge_upload_failed", error.message)
+            raise
+        state = "ready" if attached.get("status") == "completed" else "processing"
+        now = time.time()
+        self.db.run("INSERT INTO knowledge_files(tenant,vector_store_id,openai_file_id,filename,mime,size,state,error,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (tenant, base["vector_store_id"], remote["id"], Path(filename).name[:200], mime, len(data), state, "", now, now))
+        self.db.log(tenant, None, "knowledge_file_uploaded", "知识文档已上传并加入索引")
+        return self.public_knowledge()
+
+    def refresh_knowledge(self):
+        s, _ = self.settings.get()
+        tenant = tenant_id(s)
+        base = self.db.one("SELECT * FROM knowledge_bases WHERE tenant=?", (tenant,))
+        if not base:
+            return self.public_knowledge()
+        for row in self.db.all("SELECT * FROM knowledge_files WHERE tenant=? AND state='processing'", (tenant,)):
+            try:
+                remote = providers.openai_vector_store_file(s, base["vector_store_id"], row["openai_file_id"])
+                status = remote.get("status")
+                if status in ("completed", "failed", "cancelled"):
+                    self.db.run("UPDATE knowledge_files SET state=?,error=?,updated=? WHERE id=?", ("ready" if status == "completed" else "failed", str(remote.get("last_error") or "")[:500], time.time(), row["id"]))
+            except Problem as error:
+                self.db.run("UPDATE knowledge_files SET state='failed',error=?,updated=? WHERE id=?", (error.message, time.time(), row["id"]))
+        return self.public_knowledge()
+
+    def delete_knowledge_file(self, file_id):
+        s, _ = self.settings.get()
+        tenant = tenant_id(s)
+        row = self.db.one("SELECT * FROM knowledge_files WHERE id=? AND tenant=?", (file_id, tenant))
+        require(row, "knowledge_file_not_found", "知识库文件不存在", 404)
+        self.db.run("UPDATE knowledge_files SET state='deleting',updated=? WHERE id=?", (time.time(), file_id))
+        try:
+            providers.openai_delete_vector_store_file(s, row["vector_store_id"], row["openai_file_id"])
+            providers.openai_delete_file(s, row["openai_file_id"])
+        except Problem as error:
+            self.db.run("UPDATE knowledge_files SET state='failed',error=?,updated=? WHERE id=?", (error.message, time.time(), file_id))
+            raise
+        self.db.run("DELETE FROM knowledge_files WHERE id=?", (file_id,))
+        return self.public_knowledge()
+
+    def delete_knowledge(self):
+        s, _ = self.settings.get()
+        tenant = tenant_id(s)
+        base = self.db.one("SELECT * FROM knowledge_bases WHERE tenant=?", (tenant,))
+        if not base:
+            return self.public_knowledge()
+        self.db.run("UPDATE knowledge_bases SET state='deleting',updated=? WHERE id=?", (time.time(), base["id"]))
+        try:
+            providers.openai_delete_vector_store(s, base["vector_store_id"])
+            for row in self.db.all("SELECT * FROM knowledge_files WHERE tenant=?", (tenant,)):
+                try:
+                    providers.openai_delete_file(s, row["openai_file_id"])
+                except Problem:
+                    pass
+        except Problem as error:
+            self.db.run("UPDATE knowledge_bases SET state='failed',error=?,updated=? WHERE id=?", (error.message, time.time(), base["id"]))
+            raise
+        self.db.run("DELETE FROM knowledge_files WHERE tenant=?", (tenant,))
+        self.db.run("DELETE FROM knowledge_bases WHERE id=?", (base["id"],))
+        return self.public_knowledge()
+
     def validate_plan(self, plan, c, automatic=False):
         s, revision = self.settings.get()
         require(isinstance(plan, dict) and set(plan) == {"messages", "needs_human", "ticket_reason"}, "invalid_plan", "回复计划字段不正确")
@@ -612,7 +743,8 @@ class Service:
             self.db.run("UPDATE usage SET tokens=?,request_id=?,elapsed_ms=? WHERE id=?", (tokens, request_id[:200], elapsed, usage_id))
             return providers.parse_response(data), {"request_id": request_id[:200], "response_id": str(data.get("id", ""))[:200],
                                                     "model": s["openai_model"], "elapsed_ms": elapsed,
-                                                    "usage": {k: usage[k] for k in ("input_tokens", "output_tokens", "total_tokens") if type(usage.get(k)) is int}, "context": context}
+                                                    "usage": {k: usage[k] for k in ("input_tokens", "output_tokens", "total_tokens") if type(usage.get(k)) is int}, "context": context,
+                                                    "retrieval": providers.response_search_metadata(data)}
 
     def check_openai(self):
         s, revision = self.settings.get()
@@ -645,18 +777,28 @@ class Service:
         for a in self.db.all("SELECT id,kind,name,purpose,tags,channels FROM assets WHERE tenant=? AND conversation IS NULL AND state='sendable' AND enabled=1", (c["tenant"],)):
             if c["channel"] in json.loads(a["channels"]) and (job["origin"] != "ai" or self.settings.passed(c["channel"], a["kind"])):
                 assets.append({"asset_id": a["id"], "type": a["kind"], "name": a["name"], "purpose": a["purpose"], "tags": json.loads(a["tags"])})
-        payload, context = providers.response_payload(s, history, assets)
+        kb = self.db.one("SELECT * FROM knowledge_bases WHERE tenant=? AND state='ready'", (c["tenant"],))
+        payload, context = providers.response_payload(s, history, assets, kb["vector_store_id"] if kb else None)
         if self.db.unseal(job["payload"]).get("test_start"):
             payload["instructions"] += "\n這一輪是測試帳號啟用通知。請簡短說明 AI 客服測試已啟用並邀請客戶提出停車問題，不重複識別碼，不宣稱渠道驗收通過。"
         plan, result = self.model_call(s, payload, context)
         result["plan"] = plan
+        knowledge_handoff = bool(kb and not result["retrieval"].get("hit"))
+        if knowledge_handoff:
+            plan = {"messages": [], "needs_human": True, "ticket_reason": None}
+            result["plan"] = plan
+            result["handoff"] = "知识库没有找到可靠内容"
         self.db.run("UPDATE jobs SET result=?,updated=? WHERE id=?", (self.db.seal(result), time.time(), job["id"]))
         self.db.log(c["tenant"], cid, "model_completed", f"{s['openai_model']} / {result['elapsed_ms']} ms")
         with self.db.connect():
             c = self.conv(cid)
             self.assert_current(job, c)
             self.validate_plan(plan, c, job["origin"] == "ai")
-            if plan["needs_human"] and not plan["messages"]:
+            if knowledge_handoff:
+                self.cancel_ai(cid, "知识库未命中，已转人工协助")
+                self.db.run("UPDATE conversations SET mode='manual',handoff_reason=?,handoff_at=?,updated=? WHERE id=?", (result["handoff"], time.time(), time.time(), cid))
+                self.db.log(c["tenant"], cid, "human_handoff", result["handoff"])
+            elif plan["needs_human"] and not plan["messages"]:
                 plan["messages"] = [{"type": "text", "text": "我目前無法確認這個問題的答案，請補充相關資訊，或由人工客服協助確認。", "asset_id": None}]
             self.db.log(c["tenant"], cid, "plan_validated", f"{len(plan['messages'])} 条独立回复")
             if job["origin"] == "ai":

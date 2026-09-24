@@ -36,6 +36,14 @@ CREATE TABLE IF NOT EXISTS assets (
  mime TEXT NOT NULL, size INTEGER NOT NULL, path TEXT, remote_url TEXT, ref TEXT,
  state TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, channels TEXT NOT NULL,
  error TEXT, created REAL NOT NULL, UNIQUE(tenant,logical_id,version));
+CREATE TABLE IF NOT EXISTS knowledge_bases (
+ id INTEGER PRIMARY KEY, tenant TEXT NOT NULL UNIQUE, vector_store_id TEXT NOT NULL,
+ name TEXT NOT NULL, state TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', created REAL NOT NULL, updated REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS knowledge_files (
+ id INTEGER PRIMARY KEY, tenant TEXT NOT NULL, vector_store_id TEXT NOT NULL, openai_file_id TEXT NOT NULL,
+ filename TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, state TEXT NOT NULL,
+ error TEXT NOT NULL DEFAULT '', created REAL NOT NULL, updated REAL NOT NULL,
+ UNIQUE(tenant, openai_file_id));
 CREATE TABLE IF NOT EXISTS jobs (
  id TEXT PRIMARY KEY, tenant TEXT NOT NULL, conversation INTEGER, kind TEXT NOT NULL, origin TEXT NOT NULL,
  state TEXT NOT NULL, revision INTEGER NOT NULL, trigger_id TEXT, batch TEXT, seq INTEGER NOT NULL DEFAULT 0,
@@ -72,6 +80,10 @@ class Store:
                 db.execute("ALTER TABLE events ADD COLUMN payload TEXT")
             if "assigned_agent_id" not in {r[1] for r in db.execute("PRAGMA table_info(conversations)")}:
                 db.execute("ALTER TABLE conversations ADD COLUMN assigned_agent_id TEXT NOT NULL DEFAULT ''")
+            if "handoff_reason" not in {r[1] for r in db.execute("PRAGMA table_info(conversations)")}:
+                db.execute("ALTER TABLE conversations ADD COLUMN handoff_reason TEXT NOT NULL DEFAULT ''")
+            if "handoff_at" not in {r[1] for r in db.execute("PRAGMA table_info(conversations)")}:
+                db.execute("ALTER TABLE conversations ADD COLUMN handoff_at REAL")
             if "conversation" not in {r[1] for r in db.execute("PRAGMA table_info(assets)")}:
                 db.execute("ALTER TABLE assets ADD COLUMN conversation INTEGER REFERENCES conversations(id)")
         Path(path).chmod(0o600)

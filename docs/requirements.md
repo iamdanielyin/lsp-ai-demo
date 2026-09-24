@@ -57,6 +57,8 @@ Webhook 是消息到达平台后的异步通知，不是代理或前置拦截。
 | F08 | 文本、图片、视频、文件独立顺序任务，手动预览目标再发送 | `Service.manual_send`、`submit`；T06/T07/T10 |
 | F09 | 客户媒体保留真实信息，预览受权限/格式限制，不编造媒体内容 | `normalize_message`、授权媒体路由；T08/T16 |
 | F10 | 真实 Responses 调用、严格计划、上下文范围/截断/耗时/用量 | `lsp/providers.py`、`Service.generate`；T05/T09 |
+| F10a | 设置页上传/删除文档，OpenAI Vector Store 管理，file_search 命中后回答 | `lsp/providers.py`、`Service`、`static/app.js`；知识库验证 |
+| F10b | file_search 无可靠命中时当前会话转人工并显示原因 | `conversations.handoff_reason`、消息详情；知识库验证 |
 | F11 | 模型只选择已审核素材；服务器验证 ID、版本、类型、渠道和条数 | `Service.validate_plan`；T07/T09/T16 |
 | F12 | 开启后直接自动回复，防抖、逐会话有效性检查、旧计划取消 | `Service.generate`、`assert_current`；T10/T12 |
 | F13 | 人工优先，手动关闭或开启，重启保留边界，不补发旧历史 | `Service.set_mode`、`recover_after_restart`；T11/T12/T13 |
@@ -72,6 +74,8 @@ Webhook 是消息到达平台后的异步通知，不是代理或前置拦截。
 结构化输出字段为 `messages[{type,text,asset_id}]`、`needs_human`、`ticket_reason`，不允许模型指定媒体 URL、目标会话或 Agent。媒体不生成新图/视频；只由后端发送管理员审核的确定版本。文件状态至少有待上传、扫描中、可发送、失败、停用；仅启用且可发送的素材进入目录。
 
 完整历史同步与有限模型上下文分别显示。拒绝、incomplete、Token 超限、空输出、非法计划或请求失败必须停止本轮外发，不向客户转发供应商原始错误。需要人工时暂停；建单建议仅经规则、映射及去重后执行。
+
+知识库验证使用 OpenAI 托管 Vector Store。设置页可创建/删除一个当前租户知识库、上传或删除 DOCX/PDF/TXT/Markdown/CSV/JSON 文件并查看索引状态。Responses 请求仅在知识库存在时加入 `file_search` 和 `include: ["file_search_call.results"]`；无文件引用时不发送模型计划，当前会话切换为人工并在消息页显示协助原因。文档正文不写入仓库或运行日志，真实验证使用合成停车 FAQ。
 
 ## 7. 可靠性与验收要求
 

@@ -276,6 +276,34 @@ hr {
   color:#37637d;
   background:#eaf1f6
 }
+.handoff-card {
+  margin:0 0 12px;
+  padding:12px;
+  border:1px solid #edc48a;
+  border-radius:7px;
+  background:#fff7e8;
+  color:#704b1b
+}
+.handoff-card p { margin:3px 0 }
+.thread-meta.handoff {
+  color:#704b1b;
+  background:#fff7e8;
+  border:1px solid #edc48a;
+  border-radius:6px;
+  padding:8px 10px
+}
+.knowledge-list { display:grid; gap:8px; margin-top:12px }
+.knowledge-head,.knowledge-row {
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  padding:11px 12px;
+  border:1px solid var(--line);
+  border-radius:7px;
+  background:#fff
+}
+.knowledge-head small,.knowledge-row small { display:block }
 .dot {
   width:6px;
   height:6px;

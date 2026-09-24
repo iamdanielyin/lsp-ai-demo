@@ -374,6 +374,26 @@ def create_app(config=None, start_worker=True):
         require(type(data.get("new_matter", False)) is bool, "invalid_body", "新事项标记须为布尔值")
         return jsonify(service.create_ticket(cid, data.get("reason"), data.get("new_matter", False)))
 
+    @app.route("/api/knowledge", methods=["GET", "POST", "DELETE"])
+    def knowledge():
+        if request.method == "GET":
+            return jsonify(service.refresh_knowledge())
+        if request.method == "POST":
+            data = body()
+            require(set(data) <= {"name"}, "invalid_body", "知识库创建只接受 name")
+            return jsonify(service.create_knowledge(data.get("name")))
+        return jsonify(service.delete_knowledge())
+
+    @app.post("/api/knowledge/files")
+    def knowledge_file_upload():
+        file = request.files.get("file")
+        require(file and file.filename, "file_missing", "请选择知识库文档")
+        return jsonify(service.upload_knowledge_file(file.read(20_000_001), file.filename, file.mimetype)), 201
+
+    @app.delete("/api/knowledge/files/<int:file_id>")
+    def knowledge_file_delete(file_id):
+        return jsonify(service.delete_knowledge_file(file_id))
+
     @app.get("/api/jobs/<job_id>")
     def job(job_id):
         return jsonify(service.public_job(job_id))

@@ -1213,6 +1213,44 @@ class DemoTests(unittest.TestCase):
         self.svc.edit_asset(a['id'],{'enabled':False})
         self.assertEqual(self.app.test_client().get('/media/'+token).status_code,403)
 
+    def test_knowledge_base_file_lifecycle_and_validation(self):
+        with patch('lsp.providers.openai_create_vector_store', return_value={'id':'vs_demo'}), \
+             patch('lsp.providers.openai_upload_file', return_value={'id':'file_demo'}), \
+             patch('lsp.providers.openai_attach_file', return_value={'id':'vsf_demo','status':'completed'}), \
+             patch('lsp.providers.openai_delete_vector_store_file', return_value={'deleted':True}), \
+             patch('lsp.providers.openai_delete_file', return_value={'deleted':True}), \
+             patch('lsp.providers.openai_delete_vector_store', return_value={'deleted':True}):
+            created=self.call('/api/knowledge',data={'name':'停车 FAQ'})
+            self.assertEqual(created.status_code,200,created.json)
+            self.assertEqual(created.json['vector_store_id'],'vs_demo')
+            uploaded=self.client.post('/api/knowledge/files',data={'file':(io.BytesIO('入口在 A 区。'.encode()),'faq.txt')},headers={'X-CSRF-Token':self.csrf,'Origin':'http://localhost'})
+            self.assertEqual(uploaded.status_code,201,uploaded.json)
+            self.assertEqual(uploaded.json['files'][0]['state'],'ready')
+            file_id=uploaded.json['files'][0]['id']
+            self.assertEqual(self.call('/api/knowledge/files/'+str(file_id),method='DELETE').status_code,200)
+            self.assertEqual(self.call('/api/knowledge',method='DELETE').status_code,200)
+        bad=self.client.post('/api/knowledge/files',data={'file':(io.BytesIO(b'<script>x</script>'),'evil.html')},headers={'X-CSRF-Token':self.csrf,'Origin':'http://localhost'})
+        self.assertEqual(bad.status_code,400)
+
+    def test_knowledge_search_payload_and_no_hit_handoff(self):
+        s,_=self.svc.settings.get()
+        payload,_=providers.response_payload(s,[{'id':'m','actor':'user','parts':[]}],[], 'vs_demo')
+        self.assertEqual(payload['tools'],[{'type':'file_search','vector_store_ids':['vs_demo']}])
+        self.assertEqual(payload['include'],['file_search_call.results'])
+        data=self.model_response()
+        data['output'].insert(0,{'type':'file_search_call','status':'completed','search_results':[]})
+        self.assertFalse(providers.response_search_metadata(data)['hit'])
+        self.svc.db.run("INSERT INTO knowledge_bases(tenant,vector_store_id,name,state,created,updated) VALUES(?,?,?,?,?,?)",(tenant_id(s),'vs_demo','demo','ready',time.time(),time.time()))
+        self.svc.db.run("UPDATE conversations SET mode='auto',sync_complete=1,last_customer='m1' WHERE id=?",(self.c['id'],))
+        self.add_history()
+        job=self.svc.enqueue('generate',self.svc.conv(self.c['id']),origin='ai',trigger='m1')
+        with patch.object(self.svc,'sync',return_value={}),patch('lsp.providers.openai',return_value=(data,'knowledge-request')):
+            counts=self.svc.drain()
+        self.assertEqual(counts['failed'],0)
+        self.assertEqual(self.svc.conv(self.c['id'])['mode'],'manual')
+        self.assertEqual(self.svc.conv(self.c['id'])['handoff_reason'],'知识库没有找到可靠内容')
+        self.assertEqual(self.db.one("SELECT count(*) n FROM jobs WHERE conversation=? AND kind='send'",(self.c['id'],))['n'],0)
+
     def test_daily_budget_and_local_rate_limit(self):
         s,_=self.svc.settings.get();payload,ctx=providers.response_payload(s,[],[])
         s['daily_token_budget']=1000

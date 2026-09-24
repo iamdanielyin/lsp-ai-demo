@@ -15,6 +15,7 @@
 | 每个参数的默认值、含义、获取和校验 | [全部配置参数手册](docs/configuration-reference.md) |
 | Freshchat/Freshdesk上怎么操作 | [平台配置指引](docs/platform-setup.md) |
 | WhatsApp/WeChat双账号、AI/人工切换、媒体、工单怎么测 | [测试步骤与本地过程](docs/testing-guide.md) |
+| 知识库上传、检索和无命中转人工 | [知识库验证](docs/knowledge-base.md) |
 | 已完成哪些验证、哪些仍未通过 | [验收报告](docs/acceptance-report.md) / [本地证据](docs/local-evidence.json) |
 | 外部调度如何调用 | [调度API](docs/scheduler.md) |
 

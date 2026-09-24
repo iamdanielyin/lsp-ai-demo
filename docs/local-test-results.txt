@@ -31,6 +31,8 @@ test_history_failure_never_claims_complete (test_demo.DemoTests.test_history_fai
 test_http_redirect_target_revalidated (test_demo.DemoTests.test_http_redirect_target_revalidated) ... ok
 test_human_suggestion_keeps_model_reply_and_ai_enabled (test_demo.DemoTests.test_human_suggestion_keeps_model_reply_and_ai_enabled) ... ok
 test_invalid_plans_unknown_asset_empty_and_extra_fields (test_demo.DemoTests.test_invalid_plans_unknown_asset_empty_and_extra_fields) ... ok
+test_knowledge_base_file_lifecycle_and_validation (test_demo.DemoTests.test_knowledge_base_file_lifecycle_and_validation) ... ok
+test_knowledge_search_payload_and_no_hit_handoff (test_demo.DemoTests.test_knowledge_search_payload_and_no_hit_handoff) ... ok
 test_local_http_cookies_work_with_public_webhook_configured (test_demo.DemoTests.test_local_http_cookies_work_with_public_webhook_configured) ... ok
 test_malformed_signed_payload_and_cross_conversation_history (test_demo.DemoTests.test_malformed_signed_payload_and_cross_conversation_history) ... ok
 test_manual_takeover_and_partial_send_sequence (test_demo.DemoTests.test_manual_takeover_and_partial_send_sequence) ... ok
@@ -91,6 +93,6 @@ test_webhook_atomic_persist_failure (test_demo.DemoTests.test_webhook_atomic_per
 test_wrong_channel_cannot_send_and_not_support_false_switch (test_demo.DemoTests.test_wrong_channel_cannot_send_and_not_support_false_switch) ... ok
 
 ----------------------------------------------------------------------
-Ran 91 tests in 15.599s
+Ran 93 tests in 16.263s
 
 OK

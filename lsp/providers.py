@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import uuid
 from urllib.parse import urlencode
 
 from . import security
@@ -137,8 +138,11 @@ HARD_RULES = """此為停車客服 Demo。只可回答獲准的知識，不能�
 """
 
 
-def response_payload(s, messages, assets):
+def response_payload(s, messages, assets, vector_store_id=None):
     instructions = HARD_RULES + "\n" + s["system_instructions"] + f"\n最多 {s['max_reply_messages']} 條獨立回覆。"
+    if vector_store_id:
+        # Retrieval evidence is inspected after the response; no citation means human handoff.
+        instructions = "知识库已启用。业务事实必须来自 file_search；没有检索证据时输出空 messages 并请求人工协助。\n" + instructions
     base = {"knowledge": s["knowledge_text"], "assets": assets, "allowed_ticket_reasons": s["ticket_allowed_reasons"], "history": []}
     # ponytail: UTF-8 bytes are a conservative token upper bound; use a model tokenizer if context efficiency matters.
     overhead = len((instructions + json.dumps(base, ensure_ascii=False) + json.dumps(PLAN_SCHEMA)).encode()) + 256
@@ -158,22 +162,114 @@ def response_payload(s, messages, assets):
                "first": selected[0]["id"] if selected else None, "last": selected[-1]["id"] if selected else None,
                "estimated_token_upper_bound": s["context_token_budget"] - remaining,
                "method": "UTF-8 字节保守上界（包含说明、schema及目录）；输出预算单独预留"}
-    return {"model": s["openai_model"], "store": False, "instructions": instructions,
-            "input": json.dumps(base, ensure_ascii=False), "max_output_tokens": s["max_output_tokens"],
-            "text": {"format": {"type": "json_schema", "name": "customer_reply_plan", "strict": True, "schema": PLAN_SCHEMA}}}, context
+    payload = {"model": s["openai_model"], "store": False, "instructions": instructions,
+               "input": json.dumps(base, ensure_ascii=False), "max_output_tokens": s["max_output_tokens"],
+               "text": {"format": {"type": "json_schema", "name": "customer_reply_plan", "strict": True, "schema": PLAN_SCHEMA}}}
+    if vector_store_id:
+        payload["tools"] = [{"type": "file_search", "vector_store_ids": [identifier(vector_store_id)]}]
+        payload["include"] = ["file_search_call.results"]
+    return payload, context
 
 
 def openai(s, payload):
     require(s["openai_api_key"] and s["openai_model"], "openai_not_configured", "请填写 OpenAI API Key 和模型 ID", 409)
+    data, rh = openai_request(s, "/responses", "POST", payload)
+    return data, rh.get("x-request-id", "")
+
+
+def openai_headers(s):
     headers = {"Authorization": "Bearer " + s["openai_api_key"]}
     for key, header in (("openai_project", "OpenAI-Project"), ("openai_organization", "OpenAI-Organization")):
         if s[key]:
             headers[header] = s[key]
+    return headers
+
+
+def openai_request(s, path, method="GET", data=None, raw=None, content_type="application/json"):
+    require(s["openai_api_key"], "openai_not_configured", "请填写 OpenAI API Key", 409)
     base = s["openai_base_url"].rstrip("/")
-    endpoint = base if base.endswith("/responses") else base + "/responses"
+    if base.endswith("/responses"):
+        base = base[:-len("/responses")]
+    endpoint = base + path
+    headers = openai_headers(s)
+    if path.startswith("/vector_stores"):
+        headers["OpenAI-Beta"] = "assistants=v2"
+    if content_type:
+        headers["Content-Type"] = content_type
     proxy = os.getenv("https_proxy") or os.getenv("HTTPS_PROXY") or None
-    data, rh = security.json_request(endpoint, "POST", headers, payload, s["model_timeout_seconds"], proxy=proxy)
-    return data, rh.get("x-request-id", "")
+    if raw is None:
+        data, rh = security.json_request(endpoint, method, headers, data, s["model_timeout_seconds"], proxy=proxy)
+    else:
+        raw, rh = security.request(endpoint, method, headers, raw, s["model_timeout_seconds"], proxy=proxy)
+        try:
+            data = json.loads(raw)
+        except (ValueError, UnicodeError):
+            raise Problem("invalid_response", "OpenAI 未返回有效 JSON", 502) from None
+        require(isinstance(data, (dict, list)), "invalid_response", "OpenAI 返回结构不正确", 502)
+    return data, rh
+
+
+def openai_create_vector_store(s, name):
+    result, _ = openai_request(s, "/vector_stores", "POST", {"name": name})
+    require(isinstance(result, dict) and isinstance(result.get("id"), str), "knowledge_response", "OpenAI 未返回知识库 ID", 502)
+    return result
+
+
+def openai_delete_vector_store(s, vector_store_id):
+    return openai_request(s, "/vector_stores/" + identifier(vector_store_id), "DELETE")[0]
+
+
+def openai_upload_file(s, filename, mime, data):
+    boundary = "lsp_openai_" + uuid.uuid4().hex
+    safe_name = uuid.uuid4().hex + "." + filename.rsplit(".", 1)[-1].lower()
+    body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nassistants\r\n"
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{safe_name}\"\r\n"
+            f"Content-Type: {mime}\r\n\r\n").encode() + data + f"\r\n--{boundary}--\r\n".encode()
+    result, _ = openai_request(s, "/files", "POST", raw=body, content_type="multipart/form-data; boundary=" + boundary)
+    require(isinstance(result, dict) and isinstance(result.get("id"), str), "knowledge_response", "OpenAI 未返回文件 ID", 502)
+    return result
+
+
+def openai_attach_file(s, vector_store_id, file_id):
+    result, _ = openai_request(s, "/vector_stores/" + identifier(vector_store_id) + "/files", "POST", {"file_id": identifier(file_id)})
+    require(isinstance(result, dict) and isinstance(result.get("id"), str), "knowledge_response", "OpenAI 未返回知识库文件状态", 502)
+    return result
+
+
+def openai_delete_vector_store_file(s, vector_store_id, file_id):
+    return openai_request(s, "/vector_stores/" + identifier(vector_store_id) + "/files/" + identifier(file_id), "DELETE")[0]
+
+
+def openai_delete_file(s, file_id):
+    return openai_request(s, "/files/" + identifier(file_id), "DELETE")[0]
+
+
+def openai_vector_store_file(s, vector_store_id, file_id):
+    return openai_request(s, "/vector_stores/" + identifier(vector_store_id) + "/files/" + identifier(file_id))[0]
+
+
+def response_search_metadata(data):
+    searched, file_ids, filenames = False, set(), set()
+    for item in data.get("output", []) if isinstance(data, dict) else []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "file_search_call":
+            searched = True
+            for row in item.get("search_results") or item.get("results") or []:
+                if isinstance(row, dict):
+                    if row.get("file_id"):
+                        file_ids.add(str(row["file_id"]))
+                    if row.get("filename"):
+                        filenames.add(str(row["filename"]))
+        for part in item.get("content", []) if isinstance(item.get("content"), list) else []:
+            for annotation in part.get("annotations", []) if isinstance(part, dict) and isinstance(part.get("annotations"), list) else []:
+                if isinstance(annotation, dict) and annotation.get("type") == "file_citation":
+                    searched = True
+                    if annotation.get("file_id"):
+                        file_ids.add(str(annotation["file_id"]))
+                    if annotation.get("filename"):
+                        filenames.add(str(annotation["filename"]))
+    return {"searched": searched, "file_ids": sorted(file_ids), "filenames": sorted(filenames), "hit": bool(file_ids or filenames)}
 
 
 def parse_response(data):

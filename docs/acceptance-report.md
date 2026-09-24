@@ -4,10 +4,17 @@
 
 ## 本次归档复验（2026-09-22）
 
-- 全量81项自动化测试通过，Python编译、JavaScript语法和 `pip check` 通过；输出已更新。
+- 全量93项自动化测试通过，Python编译、JavaScript语法和 `pip check` 通过；输出已更新。
 - 在独立临时空目录运行初始化和 `run.py`：随机启动参数生成、已有.env拒绝覆盖、SQLite自动建库、页面HTTP200、首次管理员登录、空业务密钥及自动回复关闭均通过；临时实例已停止，没有改正常实例业务配置。
 - [需求](requirements.md)、[技术与源码导航](architecture.md)、[运行手册](runbook.md)、[全部参数](configuration-reference.md)、[测试过程](testing-guide.md) 已补齐；44个 `DEFAULTS` 参数均有独立表格项，文档链接和JSON有效。
 - 本轮已在独立临时数据库验证自动发现、单会话 AI/人工切换、双渠道隔离、原始事件查看与暂停/恢复收集；1440×1000、390×844 页面截图已检查，浏览器无运行错误。下面的历史回归截图仍保留，不代表客户渠道验收。
+
+## 知识库协同验证（2026-09-24）
+
+- 本地合成 OpenAI 响应验证了 Vector Store 创建、文档上传/关联、文件删除和知识库删除；未上传真实客户文档。
+- 本地验证了 DOCX/PDF/TXT/Markdown/CSV/JSON 扩展名、MIME、大小和基础内容校验。
+- 本地验证了 Responses `file_search` 请求结构、检索文件证据记录，以及无可靠文件引用时不外发并切换当前会话人工模式。
+- OpenAI 真实账号的 Files/Vector Stores 权限、索引耗时和真实知识问答尚未验证，状态为 `not_tested`；设置页自定义地址必须支持这些接口。
 
 ## 范围与环境
 
@@ -26,7 +33,7 @@
 
 ## 已完成的本地验证
 
-执行 `.venv/bin/python -m unittest discover -s tests -v`：**91 项通过，0 失败，15.599 秒**。完整输出：[local-test-results.txt](local-test-results.txt)。机器可读摘要：[local-evidence.json](local-evidence.json)。Python 编译和 JavaScript 语法通过；`pip check` 为此前验证结果，本次未更改依赖。
+执行 `.venv/bin/python -m unittest discover -s tests -v`：**93 项通过，0 失败，16.263 秒**。完整输出：[local-test-results.txt](local-test-results.txt)。机器可读摘要：[local-evidence.json](local-evidence.json)。Python 编译和 JavaScript 语法通过；`pip check` 为此前验证结果，本次未更改依赖。
 
 测试使用临时数据库、合成 RSA 签名、受控平台/模型响应，并阻止意外真实网络连接。覆盖：
 
