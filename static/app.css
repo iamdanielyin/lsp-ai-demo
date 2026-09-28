@@ -1418,6 +1418,11 @@ dialog::backdrop {
 .rich-message .bubble,.rich-card,.rich-carousel,.message-group,.message-options {white-space:normal;min-width:0}
 .message-text {white-space:pre-wrap;overflow-wrap:anywhere}
 .message-text+.message-text {margin-top:8px}
+.message-html {white-space:normal;overflow-wrap:anywhere}
+.message-html p {margin:0 0 8px}
+.message-html p:last-child {margin-bottom:0}
+.message-html a {color:#176247;text-decoration:underline;overflow-wrap:anywhere}
+.message-html strong,.message-html b {font-weight:700}
 .rich-card {max-width:360px;border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden;padding:14px;color:#17271e}
 .rich-card>.message-text,.rich-section+.rich-section {margin-bottom:10px}
 .rich-title {font-weight:600;margin-bottom:8px}

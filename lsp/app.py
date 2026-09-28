@@ -320,7 +320,7 @@ def create_app(config=None, start_worker=True):
             r["customer_name"] = service.customer_name(r, refresh=True)
             r["mode"] = "auto" if r["mode"] == "auto" else "manual"
             latest = db.one("SELECT parts,created,actor FROM messages WHERE conversation=? AND private=0 AND actor IN ('user','agent') ORDER BY created DESC,platform_id DESC LIMIT 1", (r["id"],))
-            parts = display_parts(db.unseal(latest["parts"]), latest["actor"] != "user") if latest else []
+            parts = display_parts(db.unseal(latest["parts"]), latest["actor"] != "user", render_html=True) if latest else []
             for _, part in walk_parts(parts):
                 if part["type"] in ("image", "video", "file"):
                     part["type"] = security.media_kind(part)
@@ -342,7 +342,7 @@ def create_app(config=None, start_worker=True):
         rows = db.all("SELECT * FROM messages WHERE conversation=? ORDER BY created DESC,platform_id DESC LIMIT ? OFFSET ?", (cid, size, before))
         s, revision = service.settings.get()
         for r in rows:
-            r["parts"] = display_parts(db.unseal(r["parts"]), r["actor"] != "user")
+            r["parts"] = display_parts(db.unseal(r["parts"]), r["actor"] != "user", render_html=True)
             r["role"] = "system" if r["actor"] == "system" else "private" if r["private"] else "customer" if r["actor"] == "user" else "agent"
             if r["actor_id"] == s["reply_actor_id"]:
                 own = db.one("SELECT origin FROM jobs WHERE tenant=? AND conversation=? AND platform_id=? AND kind='send'", (c["tenant"], cid, r["platform_id"]))

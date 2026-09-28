@@ -30,7 +30,7 @@
 | [lsp/security.py](../lsp/security.py) | URL/ID校验、公网DNS与TLS连接、固定错误、签名与文件校验 |
 | [lsp/providers.py](../lsp/providers.py) | Freshchat历史/发送/上传、Freshdesk请求、OpenAI Responses/Files/Vector Stores |
 | [lsp/service.py](../lsp/service.py) | 入站/测试码/历史/AI/知识库/人工/素材/工单/任务/恢复/清理的业务流程 |
-| [lsp/message_parts.py](../lsp/message_parts.py) | Freshchat文本/媒体/链接/卡片规范化、旧连接器文本兼容、嵌套媒体定位；不执行客户按钮回调 |
+| [lsp/message_parts.py](../lsp/message_parts.py) | Freshchat文本/媒体/链接/卡片规范化、旧连接器文本兼容、安全HTML排版、嵌套媒体定位；不执行客户按钮回调 |
 | [templates/index.html](../templates/index.html) | 页面壳与对话框挂载点 |
 | [static/app.js](../static/app.js) | 登录、设置、测试账号开关、消息/任务、素材、工单、能力矩阵 |
 | [static/app.css](../static/app.css)、[favicon.svg](../static/favicon.svg) | 样式、响应式和图标 |
@@ -85,6 +85,8 @@ Webhook验签和事务完成后返回，不等待模型或平台外发。选定�
 tenant指纹由平台地址和Token计算；轮换平台凭证也要求重新导入和验证。不是完整多租户SaaS。加密保护选定字段，ID索引元数据和磁盘媒体不是整库加密；部署另行保护磁盘与备份。不同渠道的用户ID不自动合并，即使同人拥有两个账号。
 
 历史初始化遍历到空页，重复页视为错误；增量游标来自最后成功API同步，不从最新Webhook消息推断。模型上下文另做保守预算截断，内部备注不进入模型。知识库无文件引用时当前 AI 会话转为人工并记录原因。
+
+消息详情对平台传来的 HTML 文本使用后端白名单转换，仅保留段落、换行、强调、列表和不带凭证的 HTTP/HTTPS 链接；脚本、事件属性、危险协议和未知标签不会进入浏览器。数据库继续保存原始规范化文本，旧缓存无需重新导入。私有备注仍不会进入模型上下文。
 
 ## 任务处理与外发边界
 

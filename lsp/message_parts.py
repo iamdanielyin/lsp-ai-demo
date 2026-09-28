@@ -1,8 +1,107 @@
 """Freshchat display parts; customer actions are never replayed by the admin UI."""
+import html
 import re
+from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
 from .security import require
+
+
+HTML_TAG_RE = re.compile(r"<\s*/?\s*[a-zA-Z][^>]*>")
+LINK_TEXT_RE = re.compile(r"https?://[^\s<>\"']+")
+SAFE_HTML_TAGS = {"p", "br", "strong", "b", "em", "i", "u", "ul", "ol", "li", "a"}
+DROP_HTML_TAGS = {"script", "style", "iframe", "object", "svg", "math", "template"}
+BLOCK_HTML_TAGS = {"p", "ul", "ol", "li"}
+
+
+class _SafeHTML(HTMLParser):
+    """Convert connector HTML to a tiny allow-list; never return source markup."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.output, self.plain, self.stack = [], [], []
+        self.skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if self.skip_depth:
+            if tag in DROP_HTML_TAGS:
+                self.skip_depth += 1
+            return
+        if tag in DROP_HTML_TAGS:
+            self.skip_depth = 1
+            return
+        if tag in BLOCK_HTML_TAGS:
+            self.plain.append("\n")
+        if tag == "br":
+            self.output.append("<br>")
+            self.plain.append("\n")
+        elif tag in SAFE_HTML_TAGS:
+            if tag == "a":
+                href = next((value for key, value in attrs if key.lower() == "href"), "")
+                safe = link_url(href)
+                self.stack.append((tag, bool(safe)))
+                if safe:
+                    self.output.append('<a href="' + html.escape(safe, quote=True) + '" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">')
+            else:
+                self.stack.append((tag, True))
+                self.output.append("<" + tag + ">")
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if self.skip_depth:
+            if tag in DROP_HTML_TAGS:
+                self.skip_depth -= 1
+            return
+        if tag == "br":
+            return
+        for index in range(len(self.stack) - 1, -1, -1):
+            if self.stack[index][0] == tag:
+                for opened, enabled in reversed(self.stack[index:]):
+                    if enabled:
+                        self.output.append("</" + opened + ">")
+                del self.stack[index:]
+                break
+        if tag in BLOCK_HTML_TAGS:
+            self.plain.append("\n")
+
+    def handle_data(self, data):
+        if self.skip_depth or not data:
+            return
+        self.plain.append(data)
+        cursor = 0
+        in_link = any(tag == "a" and enabled for tag, enabled in self.stack)
+        for match in LINK_TEXT_RE.finditer(data):
+            if in_link:
+                break
+            candidate = match.group(0)
+            trimmed = candidate.rstrip(".,;:!?)]}>")
+            if not link_url(trimmed):
+                continue
+            self.output.append(html.escape(data[cursor:match.start()]))
+            self.output.append('<a href="' + html.escape(trimmed, quote=True) + '" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">' + html.escape(trimmed) + "</a>")
+            if len(trimmed) < len(candidate):
+                self.output.append(html.escape(candidate[len(trimmed):]))
+            cursor = match.end()
+        self.output.append(html.escape(data[cursor:]))
+
+    def result(self):
+        # Close only tags emitted by this parser; malformed provider markup cannot escape.
+        for tag, enabled in reversed(self.stack):
+            if enabled:
+                self.output.append("</" + tag + ">")
+        plain = re.sub(r"\n[ \t]*\n[ \t]*", "\n\n", "".join(self.plain)).strip()
+        return "".join(self.output), plain
+
+
+def formatted_text(text):
+    if not isinstance(text, str) or not HTML_TAG_RE.search(text):
+        return None
+    parser = _SafeHTML()
+    parser.feed(text)
+    parser.close()
+    rendered, plain = parser.result()
+    return {"type": "html", "html": rendered, "text": plain}
 
 
 def link_url(value):
@@ -36,9 +135,18 @@ def legacy_card(text):
     return {"type": "card", "parts": [{"type": "text", "text": chunks[0][5:].strip()}, *buttons]}
 
 
-def display_parts(parts, allow_legacy=False):
+def display_parts(parts, allow_legacy=False, render_html=False):
     """Also render previously cached connector text without a history reimport."""
-    return [(legacy_card(p["text"]) or p) if allow_legacy and p["type"] == "text" else p for p in parts]
+    result = []
+    for part in parts:
+        current = (legacy_card(part["text"]) or part) if allow_legacy and part.get("type") == "text" else part
+        current = dict(current)
+        if "parts" in current:
+            current["parts"] = display_parts(current["parts"], allow_legacy=allow_legacy, render_html=render_html)
+        elif render_html and current.get("type") == "text":
+            current = formatted_text(current.get("text", "")) or current
+        result.append(current)
+    return result
 
 
 def normalize_parts(raw, depth=0):

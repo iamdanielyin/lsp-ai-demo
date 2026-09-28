@@ -352,6 +352,8 @@ function openMedia(button) {
 }
 document.addEventListener('click',e=>{const button=e.target.closest('.chat-media');if(button)openMedia(button);});
 function partHTML(p) {
+  // The authenticated API emits only allow-listed HTML from message_parts.py.
+  if(p.type==='html')return `<div class="message-html">${p.html}</div>`;
   if(p.type==='text'||p.type==='unsupported')return `<div class="message-text">${esc(p.text)}</div>`;
   if(['image','video','file'].includes(p.type))return mediaHTML(p);
   if(p.type==='link'){
@@ -369,7 +371,7 @@ function partHTML(p) {
   return '<span>此消息片段暂不支持预览，请在原工作台查看</span>';
 }
 function messageHTML(m) {
-  const rich=m.parts.some(p=>['card','carousel','link','option','group','options'].includes(p.type));
+  const rich=m.parts.some(p=>['html','card','carousel','link','option','group','options'].includes(p.type));
   return `<article class="message ${esc(m.role)} ${rich?'rich-message':''}" title="消息 ID：${esc(m.platform_id)}"><div class="message-meta"><strong>${roleNames[m.role]||m.actor}</strong><span>${fmtTime(m.created)}</span></div><div class="bubble">${m.parts.map(partHTML).join('')}<small class="media-fallback hidden">预览受来源白名单、链接有效期或浏览器限制；不代表客户发送失败。</small></div></article>`;
 }
 function updateThread(scroll=false) {

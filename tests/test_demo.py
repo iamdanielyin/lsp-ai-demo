@@ -742,6 +742,52 @@ class DemoTests(unittest.TestCase):
             self.assertEqual(link_url(value),'')
         self.assertEqual(legacy_card(text.replace('https://example.com/coupon','javascript:alert(1)'))['parts'][1]['href'],'')
 
+    def test_cached_html_notes_render_safely_and_preserve_preview(self):
+        content = '<p>1️⃣ 下載測試App：</p><br><p><strong>iOS</strong> https://example.com/ios</p><br><p>Android https://example.com/android?id=demo&amp;lang=zh</p><script>alert(1)</script><p onclick="evil()" style="color:red">完成下載</p><ul><li>登記</li><li>登入</li></ul>'
+        raw = self.message('html-note', 'agent', private=True, message_parts=[{'text': {'content': content}}])
+        self.add_history(raw)
+        self.add_history(self.message('html-public', 'agent', message_parts=[{'text': {'content': '<p>公开消息：完成下載</p>'}}]))
+        detail = self.call('/api/conversations/%s/messages' % self.c['id'], 'GET').json
+        part = next(m for m in detail['messages'] if m['platform_id'] == 'html-note')['parts'][0]
+        self.assertEqual(part['type'], 'html')
+        self.assertIn('<p>', part['html'])
+        self.assertIn('<strong>iOS</strong>', part['html'])
+        self.assertIn('<br>', part['html'])
+        self.assertIn('href="https://example.com/ios"', part['html'])
+        self.assertIn('href="https://example.com/android?id=demo&amp;lang=zh"', part['html'])
+        self.assertIn('target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer"', part['html'])
+        self.assertIn('<ul><li>登記</li><li>登入</li></ul>', part['html'])
+        self.assertIn('登記\n\n登入', part['text'])
+        self.assertIn('完成下載', part['html'])
+        self.assertNotIn('<script', part['html'])
+        self.assertNotIn('onclick', part['html'])
+        self.assertNotIn('style=', part['html'])
+        self.assertNotIn('alert(1)', part['html'])
+        self.assertNotIn('javascript:', part['html'])
+        cached = self.db.unseal(self.db.one("SELECT parts FROM messages WHERE platform_id='html-note'")['parts'])
+        self.assertEqual(cached, [{'type': 'text', 'text': content}])
+        self.assertEqual(next(m for m in detail['messages'] if m['platform_id'] == 'html-note')['role'], 'private')
+
+        preview = self.call('/api/conversations', 'GET').json['conversations'][0]['preview']
+        self.assertIn('完成下載', preview)
+        self.assertNotIn('<p>', preview)
+        self.assertNotIn('登記', preview)
+
+    def test_cached_html_rejects_dangerous_links(self):
+        content = '<p>safe https://example.com/a</p><p><a href="javascript:alert(1)">bad</a></p><p><a href="//example.com">protocol relative</a></p><p><a href="https://user:pass@example.com">credentials</a></p><a href="data:text/html,bad">data</a><img src=x onerror="evil()"><embed src=x><p><strong>after embed</p>tail &lt;script&gt;'
+        self.add_history(self.message('unsafe-html', 'agent', private=True, message_parts=[{'text': {'content': content}}]))
+        part = self.call('/api/conversations/%s/messages' % self.c['id'], 'GET').json['messages'][0]['parts'][0]
+        self.assertEqual(part['type'], 'html')
+        self.assertEqual(part['html'].count('<a '), 1)
+        self.assertIn('https://example.com/a', part['html'])
+        self.assertIn('bad', part['html'])
+        self.assertNotIn('javascript:', part['html'])
+        self.assertNotIn('user:pass@', part['html'])
+        self.assertNotIn('<img', part['html'])
+        self.assertNotIn('<embed', part['html'])
+        self.assertNotIn('<script', part['html'])
+        self.assertIn('<p><strong>after embed</strong></p>tail &lt;script&gt;', part['html'])
+
     def test_native_rich_parts_card_media_security_and_history_refresh(self):
         host='fc-use1-00-pics-bkt-00.s3.amazonaws.com'
         raw=self.message('native-card','system',message_parts=[{'text':{'content':'选择方案'}}],reply_parts=[
@@ -993,7 +1039,7 @@ class DemoTests(unittest.TestCase):
             with self.subTest(data=data),self.assertRaises(security.Problem):providers.parse_response(data)
 
     def test_context_private_filter_store_false_and_real_preview_no_send(self):
-        self.add_history();self.add_history(self.message('secret',private=True,message_parts=[{'text':{'content':'internal-note-secret'}}]))
+        self.add_history();self.add_history(self.message('secret',private=True,message_parts=[{'text':{'content':'<p><strong>internal-note-secret</strong></p>'}}]))
         job=self.svc.preview(self.c['id'])['job_id']
         with patch.object(self.svc,'sync',return_value={}),patch('lsp.providers.openai',return_value=(self.model_response(),'req_test')) as model,patch('lsp.providers.send_message') as send:
             self.svc.drain();send.assert_not_called()

@@ -55,6 +55,9 @@ if __name__=='__main__':
             if i==120:row['message_parts']=[{'image':{'url':f'https://{media_host}/map.png'}}]
             if i==121:row['message_parts']=[{'file':{'url':f'https://{media_host}/guide.mp4','name':'本地指引.mp4','file_size':len(mp4),'content_type':'video/mp4'}}]
             if i==122:row['message_parts'] += [{'file':{'url':f'https://{media_host}/{name}','name':name}} for name in ('guide.pdf','faq.md')]
+            if i==115:
+                row.update(actor_type='agent',actor_id='LOCAL_TEST_HUMAN',message_type='private')
+                row['message_parts']=[{'text':{'content':'<p>1️⃣ 下載測試停車 App（本地合成備註）：</p><br><p><strong>iOS</strong> https://example.com/ios</p><br><p><strong>Android</strong> https://example.com/android?id=demo&amp;lang=zh</p><br><p>2️⃣ 完成下載後：</p><ol><li>打開 App &gt; 按「人仔」圖示</li><li>輸入測試電話，按「下一步」</li><li>完成會員登記</li></ol><script>window.__xss=true</script><img src=x onerror="window.__xss=true">'}}]
             if i in (116,117,118,119):
                 row.update(actor_type='system',actor_id='LOCAL_TEST_SYSTEM')
             if i==116:row['message_parts']=[{'text':{'content':'Conversation was assigned to group LOCAL_TEST by Topic Group mapping'}}]
